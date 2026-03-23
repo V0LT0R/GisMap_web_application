@@ -1,28 +1,19 @@
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Fuel GIS System",
+  description: "Геоинформационная система для аналитики и визуализации АЗС",
+};
+
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <html lang="ru">
-      <body className="bg-gray-100 text-gray-900">
-        <div className="min-h-screen flex">
-          {/* Sidebar */}
-          <aside className="w-64 bg-white shadow-md p-4">
-            <h1 className="text-xl font-bold mb-6">Fuel GIS</h1>
-            <nav className="space-y-2">
-              <a href="/map" className="block hover:text-blue-500">Карта</a>
-              <a href="/analytics" className="block hover:text-blue-500">Аналитика</a>
-              <a href="/forecast" className="block hover:text-blue-500">Прогноз</a>
-            </nav>
-          </aside>
-
-          {/* Content */}
-          <main className="flex-1 p-6">
-            {children}
-          </main>
-        </div>
-      </body>
+      <body className="m-0 p-0">{children}</body>
     </html>
   );
 }

@@ -1,67 +1,86 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import { Station } from "@/types/station";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-interface MapContainerProps {
-  stations: Station[];
-}
-
-export default function MapContainer({ stations }: MapContainerProps) {
+export default function MapContainer() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
+  const [status, setStatus] = useState("Инициализация карты...");
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
-    const map = new maplibregl.Map({
-      container: mapRef.current,
-      style: "https://demotiles.maplibre.org/style.json",
-      center: [65.4823, 44.8488],
-      zoom: 11,
-    });
+    try {
+      const map = new maplibregl.Map({
+        container: mapRef.current,
+        center: [65.4823, 44.8488],
+        zoom: 10,
+        style: {
+          version: 8,
+          sources: {
+            osm: {
+              type: "raster",
+              tiles: [
+                "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+              ],
+              tileSize: 256,
+              attribution: "© OpenStreetMap contributors",
+            },
+          },
+          layers: [
+            {
+              id: "osm-tiles",
+              type: "raster",
+              source: "osm",
+            },
+          ],
+        },
+      });
 
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
+      map.addControl(new maplibregl.NavigationControl(), "top-right");
 
-    mapInstanceRef.current = map;
+      map.on("load", () => {
+        setStatus("Карта загружена");
+        map.resize();
+      });
 
-    return () => {
-      map.remove();
-      mapInstanceRef.current = null;
-    };
+      map.on("error", (e) => {
+        console.error("Map error:", e);
+        setStatus("Ошибка загрузки карты");
+      });
+
+      mapInstanceRef.current = map;
+
+      return () => {
+        map.remove();
+        mapInstanceRef.current = null;
+      };
+    } catch (error) {
+      console.error("Map init error:", error);
+      setStatus("Ошибка инициализации карты");
+    }
   }, []);
 
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
+  return (
+    <div style={{ padding: "16px", background: "#fff" }}>
+      <p style={{ marginBottom: "12px", fontWeight: 700 }}>
+        STATUS: {status}
+      </p>
 
-    const markers: maplibregl.Marker[] = [];
-
-    stations.forEach((station) => {
-      const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
-        <div style="min-width: 200px;">
-          <h3 style="margin: 0 0 8px; font-size: 16px; font-weight: 700;">
-            ${station.name}
-          </h3>
-          <p style="margin: 0 0 4px;"><strong>Бренд:</strong> ${station.brand}</p>
-          <p style="margin: 0;"><strong>Адрес:</strong> ${station.address}</p>
-        </div>
-      `);
-
-      const marker = new maplibregl.Marker()
-        .setLngLat([station.longitude, station.latitude])
-        .setPopup(popup)
-        .addTo(map);
-
-      markers.push(marker);
-    });
-
-    return () => {
-      markers.forEach((marker) => marker.remove());
-    };
-  }, [stations]);
-
-  return <div ref={mapRef} className="h-[600px] w-full rounded-2xl shadow-md" />;
+      <div
+        ref={mapRef}
+        className="h-full w-full"
+        style={{
+          width: "100%",
+          height: "600px",
+          
+          border: "2px solid black",
+        }}
+      />
+    </div>
+  );
 }
