@@ -1,5 +1,5 @@
 export type FuelStationProperties = {
-  id?: string;
+  id?: string | number;
   name?: string;
   full_name?: string;
   address_name?: string;
@@ -11,10 +11,12 @@ export type FuelStationProperties = {
   rubrics?: string[];
   reviews_count?: number;
   rating?: number;
+  fuel_types?: string[];
 };
 
 export type FuelStationFeature = {
   type: "Feature";
+  id?: string | number;
   geometry: {
     type: "Point";
     coordinates: [number, number];

@@ -1,4 +1,7 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -6,7 +9,7 @@ class Settings(BaseSettings):
     DGIS_BASE_URL: str = "https://catalog.api.2gis.com/3.0"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BASE_DIR / ".env",
         extra="ignore",
     )
 

@@ -24,7 +24,7 @@ class DgisService:
             "sort": "distance",
             "page": 1,
             "page_size": 10,
-            "fields": "items.point,items.address,items.full_address_name,items.schedule,items.rubrics,items.org,items.brand",
+            "fields": "items.point,items.address,items.full_address_name,items.schedule,items.rubrics,items.org,items.brand,items.description",
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -50,10 +50,26 @@ class DgisService:
             brand_obj = item.get("brand") or {}
             org_obj = item.get("org") or {}
             rubrics = item.get("rubrics") or []
+            description = item.get("description") or ""
+
+            fuel_types = []
+            desc_lower = description.lower()
+
+            if "аи-92" in desc_lower or "аи 92" in desc_lower or "aи-92" in desc_lower:
+                fuel_types.append("АИ-92")
+            if "аи-95" in desc_lower or "аи 95" in desc_lower or "aи-95" in desc_lower:
+                fuel_types.append("АИ-95")
+            if "аи-98" in desc_lower or "аи 98" in desc_lower or "aи-98" in desc_lower:
+                fuel_types.append("АИ-98")
+            if "дизель" in desc_lower:
+                fuel_types.append("ДТ")
+            if "газ" in desc_lower or "lpg" in desc_lower:
+                fuel_types.append("Газ")
 
             features.append(
                 {
                     "type": "Feature",
+                    "id": item.get("id"),
                     "geometry": {
                         "type": "Point",
                         "coordinates": [lon, lat],
@@ -68,6 +84,8 @@ class DgisService:
                         "org_name": org_obj.get("name"),
                         "schedule_text": schedule.get("text"),
                         "rubrics": [r.get("name") for r in rubrics if r.get("name")],
+                        "description": description,
+                        "fuel_types": fuel_types,
                     },
                 }
             )
