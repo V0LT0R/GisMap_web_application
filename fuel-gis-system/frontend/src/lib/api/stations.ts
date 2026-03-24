@@ -1,14 +1,42 @@
-import { Station } from "@/types/station";
+export type FuelStationProperties = {
+  id?: string;
+  name?: string;
+  full_name?: string;
+  address_name?: string;
+  full_address_name?: string;
+  brand?: string;
+  org_name?: string;
+  description?: string;
+  schedule_text?: string;
+  rubrics?: string[];
+  reviews_count?: number;
+  rating?: number;
+};
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+export type FuelStationFeature = {
+  type: "Feature";
+  geometry: {
+    type: "Point";
+    coordinates: [number, number];
+  };
+  properties: FuelStationProperties;
+};
 
-export async function getStations(): Promise<Station[]> {
-  const response = await fetch(`${API_BASE_URL}/api/stations`, {
+export type FuelStationsGeoJSON = {
+  type: "FeatureCollection";
+  features: FuelStationFeature[];
+};
+
+const BACKEND_URL = "http://localhost:8000";
+
+export async function fetchFuelStationsAstana(): Promise<FuelStationsGeoJSON> {
+  const response = await fetch(`${BACKEND_URL}/api/stations/2gis`, {
+    method: "GET",
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error("Не удалось загрузить список АЗС");
+    throw new Error(`Backend request failed: ${response.status}`);
   }
 
   return response.json();
