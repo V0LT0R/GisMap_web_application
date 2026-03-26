@@ -5,7 +5,7 @@ import maplibregl, { type MapLayerMouseEvent } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import {
-  fetchFuelStationsAstana,
+  fetchFuelStationsByLocation,
   type FuelStationFeature,
   type FuelStationsGeoJSON,
 } from "@/lib/api/stations";
@@ -15,6 +15,32 @@ function emptyFeatureCollection(): GeoJSON.FeatureCollection<GeoJSON.Point> {
     type: "FeatureCollection",
     features: [],
   };
+}
+
+function getUserLocation(): Promise<{ lat: number; lon: number }> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Геолокация не поддерживается браузером"));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+        });
+      },
+      (error) => {
+        reject(error);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  });
 }
 
 export default function MapContainer() {
@@ -64,9 +90,24 @@ export default function MapContainer() {
       loadedRef.current = true;
 
       try {
-        setStatus("Загрузка АЗС...");
+        setStatus("Определение геолокации...");
 
-        const stationsData = await fetchFuelStationsAstana();
+        const { lat, lon } = await getUserLocation();
+
+        map.flyTo({
+          center: [lon, lat],
+          zoom: 13,
+          duration: 1200,
+          essential: true,
+        });
+
+        new maplibregl.Marker({ color: "#16a34a" })
+          .setLngLat([lon, lat])
+          .addTo(map);
+
+        setStatus("Загрузка АЗС рядом с вами...");
+
+        const stationsData = await fetchFuelStationsByLocation(lat, lon, 30000);
         stationsDataRef.current = stationsData;
 
         map.addSource("fuel-stations", {
@@ -157,10 +198,10 @@ export default function MapContainer() {
           });
         });
 
-        setStatus(`Загружено АЗС: ${stationsData.features.length}`);
+        setStatus(`Загружено АЗС рядом с вами: ${stationsData.features.length}`);
       } catch (error) {
         console.error("Fuel stations loading error:", error);
-        setStatus("Ошибка загрузки АЗС");
+        setStatus("Не удалось определить геолокацию или загрузить АЗС");
       }
     });
 

@@ -9,18 +9,25 @@ class DgisService:
         self.base_url = settings.DGIS_BASE_URL.rstrip("/")
         self.api_key = settings.DGIS_API_KEY
 
-    async def fetch_fuel_stations_astana(self) -> Dict[str, Any]:
+    async def fetch_fuel_stations_by_location(
+        self,
+        lat: float,
+        lon: float,
+        radius: int = 30000,
+    ) -> Dict[str, Any]:
         if not self.api_key:
             raise HTTPException(status_code=500, detail="DGIS_API_KEY is not configured")
 
         url = f"{self.base_url}/items"
+        point = f"{lon},{lat}"
+
         params = {
             "key": self.api_key,
-            "q": "АЗС Астана",
+            "q": "АЗС",
             "type": "branch",
-            "point": "71.4304,51.1282",
-            "radius": 30000,
-            "location": "71.4304,51.1282",
+            "point": point,
+            "location": point,
+            "radius": radius,
             "sort": "distance",
             "page": 1,
             "page_size": 10,
@@ -38,11 +45,11 @@ class DgisService:
         features: List[Dict[str, Any]] = []
 
         for item in items:
-            point = item.get("point") or {}
-            lon = point.get("lon")
-            lat = point.get("lat")
+            point_obj = item.get("point") or {}
+            item_lon = point_obj.get("lon")
+            item_lat = point_obj.get("lat")
 
-            if lon is None or lat is None:
+            if item_lon is None or item_lat is None:
                 continue
 
             address_obj = item.get("address") or {}
@@ -55,16 +62,18 @@ class DgisService:
             fuel_types = []
             desc_lower = description.lower()
 
-            if "аи-92" in desc_lower or "аи 92" in desc_lower or "aи-92" in desc_lower:
+            if "аи-92" in desc_lower or "аи 92" in desc_lower:
                 fuel_types.append("АИ-92")
-            if "аи-95" in desc_lower or "аи 95" in desc_lower or "aи-95" in desc_lower:
+            if "аи-95" in desc_lower or "аи 95" in desc_lower:
                 fuel_types.append("АИ-95")
-            if "аи-98" in desc_lower or "аи 98" in desc_lower or "aи-98" in desc_lower:
+            if "аи-98" in desc_lower or "аи 98" in desc_lower:
                 fuel_types.append("АИ-98")
             if "дизель" in desc_lower:
                 fuel_types.append("ДТ")
             if "газ" in desc_lower or "lpg" in desc_lower:
                 fuel_types.append("Газ")
+
+            fuel_types = list(dict.fromkeys(fuel_types))
 
             features.append(
                 {
@@ -72,7 +81,7 @@ class DgisService:
                     "id": item.get("id"),
                     "geometry": {
                         "type": "Point",
-                        "coordinates": [lon, lat],
+                        "coordinates": [item_lon, item_lat],
                     },
                     "properties": {
                         "id": item.get("id"),

@@ -9,8 +9,6 @@ export type FuelStationProperties = {
   description?: string;
   schedule_text?: string;
   rubrics?: string[];
-  reviews_count?: number;
-  rating?: number;
   fuel_types?: string[];
 };
 
@@ -31,8 +29,18 @@ export type FuelStationsGeoJSON = {
 
 const BACKEND_URL = "http://localhost:8000";
 
-export async function fetchFuelStationsAstana(): Promise<FuelStationsGeoJSON> {
-  const response = await fetch(`${BACKEND_URL}/api/stations/2gis`, {
+export async function fetchFuelStationsByLocation(
+  lat: number,
+  lon: number,
+  radius = 30000
+): Promise<FuelStationsGeoJSON> {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lon: String(lon),
+    radius: String(radius),
+  });
+
+  const response = await fetch(`${BACKEND_URL}/api/stations/2gis?${params.toString()}`, {
     method: "GET",
     cache: "no-store",
   });
