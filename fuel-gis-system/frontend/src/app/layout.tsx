@@ -1,19 +1,19 @@
-import type { Metadata } from "next";
 import "./globals.css";
+import "bootstrap/dist/css/bootstrap.min.css";
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Fuel GIS System",
-  description: "Геоинформационная система для аналитики и визуализации АЗС",
+  description: "Административная панель и карта АЗС",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="ru">
-      <body className="m-0 p-0">{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

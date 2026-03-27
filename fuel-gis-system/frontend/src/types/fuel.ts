@@ -1,28 +1,12 @@
-export type FuelStationProperties = {
-  osm_id: number;
-  osm_type: string;
-  name?: string;
-  brand?: string;
-  operator?: string;
-  address?: string;
-  opening_hours?: string;
-  fuel_diesel?: string;
-  fuel_92?: string;
-  fuel_95?: string;
-  fuel_98?: string;
-  fuel_lpg?: string;
+export type FuelType = {
+  id: number;
+  code: string;
+  name: string;
+  sort_order: number;
 };
 
-export type FuelStationFeature = {
-  type: "Feature";
-  geometry: {
-    type: "Point";
-    coordinates: [number, number];
-  };
-  properties: FuelStationProperties;
-};
-
-export type FuelStationsGeoJSON = {
-  type: "FeatureCollection";
-  features: FuelStationFeature[];
+export type StationFuelItemUpdate = {
+  fuel_type_id: number;
+  is_available: boolean;
+  price?: number | null;
 };

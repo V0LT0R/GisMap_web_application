@@ -1,191 +1,305 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { type MapLayerMouseEvent } from "maplibre-gl";
+import maplibregl, { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import {
-  fetchFuelStationsByLocation,
-  type FuelStationFeature,
-  type FuelStationsGeoJSON,
-} from "@/lib/api/stations";
+import SearchInput from "@/components/common/SearchInput";
+import { getStationPublicById, getStations } from "@/lib/api/stations";
+import type { StationFull, StationListItem } from "@/types/station";
 
-function emptyFeatureCollection(): GeoJSON.FeatureCollection<GeoJSON.Point> {
+type UserLocation = {
+  latitude: number;
+  longitude: number;
+};
+
+const FUEL_LABELS: Record<string, string> = {
+  AI_80: "АИ-80",
+  AI_92: "АИ-92",
+  AI_95: "АИ-95",
+  AI_98: "АИ-98",
+  DT: "ДТ",
+  GAS: "Газ",
+  LPG: "LPG",
+  EV: "Электро",
+};
+
+function getStationGroup(station: StationListItem): string {
+  if (station.brand && station.brand.trim()) {
+    return station.brand.trim();
+  }
+
+  const rawName = (station.name || "").trim();
+  if (!rawName) return "Без бренда";
+
+  return rawName.split(",")[0].trim() || "Без бренда";
+}
+
+function toRad(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function getDistanceKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const earthRadiusKm = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
+function createCircleGeoJSON(
+  centerLng: number,
+  centerLat: number,
+  radiusKm: number,
+  points = 64
+) {
+  const coords: [number, number][] = [];
+  const distanceX = radiusKm / (111.32 * Math.cos((centerLat * Math.PI) / 180));
+  const distanceY = radiusKm / 110.574;
+
+  for (let i = 0; i < points; i += 1) {
+    const theta = (i / points) * (2 * Math.PI);
+    const x = distanceX * Math.cos(theta);
+    const y = distanceY * Math.sin(theta);
+    coords.push([centerLng + x, centerLat + y]);
+  }
+
+  coords.push(coords[0]);
+
   return {
-    type: "FeatureCollection",
-    features: [],
+    type: "Feature",
+    geometry: {
+      type: "Polygon",
+      coordinates: [coords],
+    },
+    properties: {},
   };
 }
 
-function getUserLocation(): Promise<{ lat: number; lon: number }> {
-  return new Promise((resolve, reject) => {
+function buildFuelHtml(data: StationFull) {
+  if (!data.fuels || data.fuels.length === 0) {
+    return `<div style="margin-top:10px;color:#6b7280;">Данные по топливу не добавлены</div>`;
+  }
+
+  const items = data.fuels
+    .map((fuel) => {
+      const price =
+        fuel.price !== null && fuel.price !== undefined
+          ? `${fuel.price} ₸/л`
+          : "-";
+
+      return `
+        <div style="
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          padding:6px 0;
+          border-bottom:1px solid #f1f5f9;
+          font-size:14px;
+          gap:12px;
+        ">
+          <span style="font-weight:600;">${fuel.name}</span>
+          <span style="font-weight:500; color:#111827; white-space:nowrap;">${price}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `
+    <div style="margin-top:12px;">
+      <div style="font-weight:700;margin-bottom:6px;">Топливо и цены</div>
+      <div>${items}</div>
+    </div>
+  `;
+}
+
+function buildPopupHtml(data: StationFull) {
+  return `
+    <div style="
+      min-width:120px;
+      max-width:220px;
+      font-family:Arial, sans-serif;
+      font-size:14px;
+      color:#111827;
+    ">
+      <div style="font-size:18px;font-weight:700;margin-bottom:10px;">
+        ${data.station.name || "АЗС"}
+      </div>
+
+      <div style="margin-bottom:6px;">
+        <strong>Адрес:</strong> ${data.station.full_address_name || data.station.address_name || "-"}
+      </div>
+
+      <div style="margin-bottom:6px;">
+        <strong>Работает:</strong> ${data.details.is_operational ? "Да" : "Нет"}
+      </div>
+
+      <div style="margin-bottom:6px;">
+        <strong>Часы:</strong> ${data.details.working_hours || data.station.schedule_text_api || "-"}
+      </div>
+
+      <div style="margin-bottom:6px;">
+        <strong>Колонки:</strong> ${data.details.columns_count ?? "-"}
+      </div>
+
+      ${buildFuelHtml(data)}
+    </div>
+  `;
+}
+
+export default function MapContainer() {
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+
+  const [stations, setStations] = useState<StationListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [geoError, setGeoError] = useState("");
+  const [radiusKm, setRadiusKm] = useState(5);
+
+  const [selectedFuelCodes, setSelectedFuelCodes] = useState<string[]>([]);
+  const [selectedStationGroups, setSelectedStationGroups] = useState<string[]>(
+    []
+  );
+  const [fuelSearch, setFuelSearch] = useState("");
+  const [stationGroupSearch, setStationGroupSearch] = useState("");
+
+  const [selectedStation, setSelectedStation] = useState<StationFull | null>(
+    null
+  );
+  const [selectedStationLoading, setSelectedStationLoading] = useState(false);
+
+  useEffect(() => {
+    const loadStations = async () => {
+      try {
+        setLoading(true);
+        setError("");
+        const data = await getStations();
+        setStations(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Ошибка загрузки станций");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadStations();
+  }, []);
+
+  const requestUserLocation = () => {
     if (!navigator.geolocation) {
-      reject(new Error("Геолокация не поддерживается браузером"));
+      setGeoError("Геолокация не поддерживается браузером");
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        resolve({
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
+        setGeoError("");
+        setUserLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
         });
       },
-      (error) => reject(error),
+      () => {
+        setGeoError("Не удалось определить геолокацию");
+      },
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 0,
       }
     );
-  });
-}
-
-function radiusLabel(radiusMeters: number): string {
-  if (radiusMeters < 1000) {
-    return `${radiusMeters} м`;
-  }
-  return `${radiusMeters / 1000} км`;
-}
-
-export default function MapContainer() {
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<maplibregl.Map | null>(null);
-  const loadedRef = useRef(false);
-  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const userLocationRef = useRef<{ lat: number; lon: number } | null>(null);
-  const allStationsRef = useRef<FuelStationsGeoJSON | null>(null);
-  const requestIdRef = useRef(0);
-
-  const [status, setStatus] = useState("Инициализация карты...");
-  const [selectedStation, setSelectedStation] = useState<FuelStationFeature | null>(null);
-
-  const [radius, setRadius] = useState(5000);
-  const [debouncedRadius, setDebouncedRadius] = useState(5000);
-
-  const [selectedFuel, setSelectedFuel] = useState("all");
-  const [selectedBrand, setSelectedBrand] = useState("all");
-
-  const [allStations, setAllStations] = useState<FuelStationFeature[]>([]);
+  };
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedRadius(radius);
-    }, 500);
+    requestUserLocation();
+  }, []);
 
-    return () => window.clearTimeout(timer);
-  }, [radius]);
+  const availableFuelCodes = useMemo(() => {
+    const set = new Set<string>();
+    stations.forEach((station) => {
+      station.fuel_codes?.forEach((code) => set.add(code));
+    });
+    return Array.from(set).sort();
+  }, [stations]);
 
-  const brandOptions = useMemo(() => {
-    const brands = allStations
-      .map((item) => item.properties.brand || item.properties.org_name || "Без бренда")
-      .filter(Boolean);
+  const availableStationGroups = useMemo(() => {
+    const set = new Set<string>();
+    stations.forEach((station) => {
+      set.add(getStationGroup(station));
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [stations]);
 
-    return ["all", ...Array.from(new Set(brands)).sort((a, b) => a.localeCompare(b, "ru"))];
-  }, [allStations]);
+  const filteredFuelCodes = useMemo(() => {
+    const query = fuelSearch.trim().toLowerCase();
+    if (!query) return availableFuelCodes;
 
-  const fuelOptions = useMemo(() => {
-    const fuels = allStations.flatMap((item) =>
-      Array.isArray(item.properties.fuel_types) ? item.properties.fuel_types : []
+    return availableFuelCodes.filter((code) => {
+      const label = (FUEL_LABELS[code] || code).toLowerCase();
+      return label.includes(query) || code.toLowerCase().includes(query);
+    });
+  }, [availableFuelCodes, fuelSearch]);
+
+  const filteredStationGroupsForFilter = useMemo(() => {
+    const query = stationGroupSearch.trim().toLowerCase();
+    if (!query) return availableStationGroups;
+
+    return availableStationGroups.filter((group) =>
+      group.toLowerCase().includes(query)
     );
-
-    return ["all", ...Array.from(new Set(fuels)).sort((a, b) => a.localeCompare(b, "ru"))];
-  }, [allStations]);
-
-  useEffect(() => {
-    if (selectedBrand !== "all" && !brandOptions.includes(selectedBrand)) {
-      setSelectedBrand("all");
-    }
-  }, [brandOptions, selectedBrand]);
-
-  useEffect(() => {
-    if (selectedFuel !== "all" && !fuelOptions.includes(selectedFuel)) {
-      setSelectedFuel("all");
-    }
-  }, [fuelOptions, selectedFuel]);
+  }, [availableStationGroups, stationGroupSearch]);
 
   const filteredStations = useMemo(() => {
-    return allStations.filter((station) => {
-      const brand = station.properties.brand || station.properties.org_name || "Без бренда";
-      const fuelTypes = Array.isArray(station.properties.fuel_types)
-        ? station.properties.fuel_types
-        : [];
+    return stations.filter((station) => {
+      if (station.latitude == null || station.longitude == null) return false;
 
-      const brandOk = selectedBrand === "all" || brand === selectedBrand;
-      const fuelOk =
-        selectedFuel === "all" ||
-        fuelTypes.some((fuel) => fuel.toLowerCase() === selectedFuel.toLowerCase());
+      if (userLocation) {
+        const distance = getDistanceKm(
+          userLocation.latitude,
+          userLocation.longitude,
+          station.latitude,
+          station.longitude
+        );
+        if (distance > radiusKm) return false;
+      }
 
-      return brandOk && fuelOk;
+      if (selectedFuelCodes.length > 0) {
+        const codes = station.fuel_codes || [];
+        const hasFuel = selectedFuelCodes.every((code) => codes.includes(code));
+        if (!hasFuel) return false;
+      }
+
+      if (selectedStationGroups.length > 0) {
+        const group = getStationGroup(station);
+        if (!selectedStationGroups.includes(group)) return false;
+      }
+
+      return true;
     });
-  }, [allStations, selectedFuel, selectedBrand]);
-
-  async function loadStationsByUserLocation(newRadius: number) {
-    const map = mapInstanceRef.current;
-    const userLocation = userLocationRef.current;
-
-    if (!map || !userLocation) return;
-
-    const currentRequestId = ++requestIdRef.current;
-    setStatus(`Загрузка АЗС в радиусе ${radiusLabel(newRadius)}...`);
-
-    try {
-      const stationsData = await fetchFuelStationsByLocation(
-        userLocation.lat,
-        userLocation.lon,
-        newRadius
-      );
-
-      if (currentRequestId !== requestIdRef.current) {
-        return;
-      }
-
-      allStationsRef.current = stationsData;
-      setAllStations(stationsData.features);
-      setSelectedStation(null);
-
-      const fuelSource = map.getSource("fuel-stations") as maplibregl.GeoJSONSource | undefined;
-      if (fuelSource) {
-        fuelSource.setData({
-          type: "FeatureCollection",
-          features: stationsData.features.map((item) => ({
-            type: "Feature",
-            geometry: {
-              type: "Point",
-              coordinates: item.geometry.coordinates,
-            },
-            properties: {
-              id: item.properties.id,
-              name: item.properties.name,
-              brand: item.properties.brand,
-            },
-          })),
-        });
-      }
-
-      const selectedSource = map.getSource("selected-station") as maplibregl.GeoJSONSource | undefined;
-      if (selectedSource) {
-        selectedSource.setData(emptyFeatureCollection());
-      }
-
-      setStatus(`Загружено АЗС: ${stationsData.features.length}. Радиус: ${radiusLabel(newRadius)}`);
-    } catch (error) {
-      if (currentRequestId !== requestIdRef.current) {
-        return;
-      }
-
-      console.error(error);
-      setStatus(error instanceof Error ? error.message : "Ошибка загрузки АЗС");
-    }
-  }
+  }, [stations, userLocation, radiusKm, selectedFuelCodes, selectedStationGroups]);
 
   useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+    if (!mapContainerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
-      container: mapRef.current,
-      center: [71.4304, 51.1282],
-      zoom: 11,
+      container: mapContainerRef.current,
       style: {
         version: 8,
         sources: {
@@ -202,353 +316,425 @@ export default function MapContainer() {
         },
         layers: [
           {
-            id: "osm-tiles",
+            id: "osm",
             type: "raster",
             source: "osm",
           },
         ],
       },
+      center: [71.4491, 51.1694],
+      zoom: 11.5,
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
 
-    map.on("load", async () => {
-      if (loadedRef.current) return;
-      loadedRef.current = true;
-
-      try {
-        setStatus("Определение геолокации...");
-
-        const { lat, lon } = await getUserLocation();
-        userLocationRef.current = { lat, lon };
-
-        map.flyTo({
-          center: [lon, lat],
-          zoom: 13,
-          duration: 1200,
-          essential: true,
-        });
-
-        userMarkerRef.current = new maplibregl.Marker({ color: "#16a34a" })
-          .setLngLat([lon, lat])
-          .addTo(map);
-
-        map.addSource("fuel-stations", {
+    map.on("load", () => {
+      if (!map.getSource("search-radius")) {
+        map.addSource("search-radius", {
           type: "geojson",
-          data: emptyFeatureCollection(),
-        });
-
-        map.addSource("selected-station", {
-          type: "geojson",
-          data: emptyFeatureCollection(),
-        });
-
-        map.addLayer({
-          id: "fuel-stations-layer",
-          type: "circle",
-          source: "fuel-stations",
-          paint: {
-            "circle-radius": 6,
-            "circle-color": "#dc2626",
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#ffffff",
-          },
-        });
-
-        map.addLayer({
-          id: "selected-station-layer",
-          type: "circle",
-          source: "selected-station",
-          paint: {
-            "circle-radius": 11,
-            "circle-color": "#2563eb",
-            "circle-stroke-width": 3,
-            "circle-stroke-color": "#ffffff",
-          },
-        });
-
-        map.on("mouseenter", "fuel-stations-layer", () => {
-          map.getCanvas().style.cursor = "pointer";
-        });
-
-        map.on("mouseleave", "fuel-stations-layer", () => {
-          map.getCanvas().style.cursor = "";
-        });
-
-        map.on("click", "fuel-stations-layer", (e: MapLayerMouseEvent) => {
-          const clicked = e.features?.[0];
-          if (!clicked) return;
-
-          const clickedProps = clicked.properties as Record<string, unknown> | undefined;
-          const clickedId = clickedProps?.id;
-
-          const rawData = allStationsRef.current;
-          if (!rawData || clickedId == null) return;
-
-          const originalFeature = rawData.features.find(
-            (item) => String(item.properties.id) === String(clickedId)
-          );
-
-          if (!originalFeature) return;
-
-          setSelectedStation(originalFeature);
-
-          const selectedSource = map.getSource("selected-station") as maplibregl.GeoJSONSource;
-          selectedSource.setData({
+          data: {
             type: "FeatureCollection",
-            features: [
-              {
-                type: "Feature",
-                geometry: {
-                  type: "Point",
-                  coordinates: originalFeature.geometry.coordinates,
-                },
-                properties: {
-                  id: originalFeature.properties.id,
-                },
-              },
-            ],
-          });
-
-          map.flyTo({
-            center: originalFeature.geometry.coordinates,
-            zoom: 14.5,
-            duration: 1200,
-            essential: true,
-          });
+            features: [],
+          },
         });
 
-        await loadStationsByUserLocation(debouncedRadius);
-      } catch (error) {
-        console.error("Fuel stations loading error:", error);
-        setStatus("Не удалось определить геолокацию или загрузить АЗС");
+        map.addLayer({
+          id: "search-radius-fill",
+          type: "fill",
+          source: "search-radius",
+          paint: {
+            "fill-color": "#2563eb",
+            "fill-opacity": 0.08,
+          },
+        });
+
+        map.addLayer({
+          id: "search-radius-line",
+          type: "line",
+          source: "search-radius",
+          paint: {
+            "line-color": "#2563eb",
+            "line-width": 2,
+            "line-opacity": 0.7,
+          },
+        });
       }
     });
 
-    mapInstanceRef.current = map;
+    mapRef.current = map;
 
     return () => {
+      markersRef.current.forEach((marker) => marker.remove());
+      markersRef.current = [];
       userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
       map.remove();
-      mapInstanceRef.current = null;
+      mapRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    const map = mapInstanceRef.current;
-    if (!map) return;
+    const map = mapRef.current;
+    if (!map || !userLocation) return;
 
-    const source = map.getSource("fuel-stations") as maplibregl.GeoJSONSource | undefined;
-    if (!source) return;
+    userMarkerRef.current?.remove();
 
-    source.setData({
+    const outer = document.createElement("div");
+    outer.style.width = "34px";
+    outer.style.height = "34px";
+    outer.style.borderRadius = "50%";
+    outer.style.background = "rgba(37, 99, 235, 0.18)";
+    outer.style.border = "2px solid rgba(37, 99, 235, 0.35)";
+    outer.style.display = "flex";
+    outer.style.alignItems = "center";
+    outer.style.justifyContent = "center";
+    outer.style.boxShadow = "0 0 12px rgba(37,99,235,0.25)";
+
+    const inner = document.createElement("div");
+    inner.style.width = "14px";
+    inner.style.height = "14px";
+    inner.style.borderRadius = "50%";
+    inner.style.background = "#2563eb";
+    inner.style.border = "3px solid white";
+    inner.style.boxShadow = "0 0 10px rgba(37,99,235,0.45)";
+
+    outer.appendChild(inner);
+
+    userMarkerRef.current = new maplibregl.Marker({ element: outer })
+      .setLngLat([userLocation.longitude, userLocation.latitude])
+      .setPopup(
+        new maplibregl.Popup({ offset: 18 }).setHTML(`
+          <div style="font-family:Arial,sans-serif;font-size:14px;">
+            <div style="font-weight:700;margin-bottom:6px;">Моё местоположение</div>
+            <div>Широта: ${userLocation.latitude.toFixed(6)}</div>
+            <div>Долгота: ${userLocation.longitude.toFixed(6)}</div>
+            <div style="margin-top:6px;">Радиус поиска: ${radiusKm} км</div>
+          </div>
+        `)
+      )
+      .addTo(map);
+
+    const circleData = {
       type: "FeatureCollection",
-      features: filteredStations.map((item) => ({
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: item.geometry.coordinates,
-        },
-        properties: {
-          id: item.properties.id,
-          name: item.properties.name,
-          brand: item.properties.brand,
-        },
-      })),
-    });
+      features: [
+        createCircleGeoJSON(
+          userLocation.longitude,
+          userLocation.latitude,
+          radiusKm
+        ),
+      ],
+    };
 
-    if (selectedStation) {
-      const stillExists = filteredStations.some(
-        (item) => String(item.properties.id) === String(selectedStation.properties.id)
-      );
-
-      if (!stillExists) {
-        setSelectedStation(null);
-        const selectedSource = map.getSource("selected-station") as maplibregl.GeoJSONSource | undefined;
-        selectedSource?.setData(emptyFeatureCollection());
-      }
+    const source = map.getSource("search-radius") as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(circleData as never);
     }
-  }, [filteredStations, selectedStation]);
+  }, [userLocation, radiusKm]);
 
   useEffect(() => {
-    const userLocation = userLocationRef.current;
-    if (!userLocation) return;
-
-    loadStationsByUserLocation(debouncedRadius);
-  }, [debouncedRadius]);
-
-  const handleClosePanel = () => {
-    setSelectedStation(null);
-
-    const map = mapInstanceRef.current;
+    const map = mapRef.current;
     if (!map) return;
 
-    const selectedSource = map.getSource("selected-station") as maplibregl.GeoJSONSource | undefined;
-    selectedSource?.setData(emptyFeatureCollection());
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = [];
+
+    filteredStations.forEach((station) => {
+      if (station.latitude == null || station.longitude == null) return;
+
+      const popup = new maplibregl.Popup({ offset: 20 }).setHTML(`
+        <div style="min-width:240px;">Загрузка данных...</div>
+      `);
+
+      popup.on("open", async () => {
+        try {
+          const details = await getStationPublicById(station.id);
+          popup.setHTML(buildPopupHtml(details));
+        } catch {
+          popup.setHTML(`
+            <div style="min-width:240px;">
+              <div style="font-weight:700;margin-bottom:8px;">${
+                station.name || "АЗС"
+              }</div>
+              <div>Не удалось загрузить детали станции</div>
+            </div>
+          `);
+        }
+      });
+
+      const el = document.createElement("div");
+      el.className = "station-marker";
+      el.style.width = "14px";
+      el.style.height = "14px";
+      el.style.borderRadius = "50%";
+      el.style.backgroundColor = station.is_operational ? "#dc3545" : "#6c757d";
+      el.style.border = "2px solid white";
+      el.style.boxShadow = "0 0 6px rgba(0,0,0,0.35)";
+      el.style.cursor = "pointer";
+
+      el.addEventListener("click", async () => {
+        try {
+          setSelectedStationLoading(true);
+          const details = await getStationPublicById(station.id);
+          setSelectedStation(details);
+        } catch {
+          setSelectedStation(null);
+        } finally {
+          setSelectedStationLoading(false);
+        }
+      });
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([station.longitude, station.latitude])
+        .setPopup(popup)
+        .addTo(map);
+
+      markersRef.current.push(marker);
+    });
+
+    const bounds = new maplibregl.LngLatBounds();
+
+    filteredStations.forEach((station) => {
+      if (station.latitude != null && station.longitude != null) {
+        bounds.extend([station.longitude, station.latitude]);
+      }
+    });
+
+    if (userLocation) {
+      bounds.extend([userLocation.longitude, userLocation.latitude]);
+    }
+
+    if (!bounds.isEmpty()) {
+      map.fitBounds(bounds, {
+        padding: 80,
+        maxZoom: 13,
+        duration: 700,
+      });
+    }
+  }, [filteredStations, userLocation]);
+
+  const toggleFuelCode = (code: string) => {
+    setSelectedFuelCodes((prev) =>
+      prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]
+    );
+  };
+
+  const toggleStationGroup = (group: string) => {
+    setSelectedStationGroups((prev) =>
+      prev.includes(group) ? prev.filter((x) => x !== group) : [...prev, group]
+    );
+  };
+
+  const resetFilters = () => {
+    setSelectedFuelCodes([]);
+    setSelectedStationGroups([]);
+    setFuelSearch("");
+    setStationGroupSearch("");
+    setRadiusKm(5);
   };
 
   return (
-    <div className="map-page">
-      <div className="map-toolbar">
-        <strong>STATUS:</strong> {status}
-      </div>
+    <div
+      className="position-relative"
+      style={{ width: "100%", height: "100vh" }}
+    >
+      <div
+        className="position-absolute top-0 start-0 m-3 p-3 bg-white rounded shadow z-3"
+        style={{ width: 340, maxHeight: "85vh", overflowY: "auto" }}
+      >
+        <h5 className="mb-3">Поиск АЗС рядом</h5>
 
-      <div className="map-filters">
-        <div className="filter-group filter-group-radius">
-          <label htmlFor="radiusRange" className="filter-label">
-            Радиус поиска: <strong>{radiusLabel(radius)}</strong>
-          </label>
-          <input
-            id="radiusRange"
-            type="range"
-            min={1000}
-            max={15000}
-            step={1000}
-            value={radius}
-            onChange={(e) => setRadius(Number(e.target.value))}
-            className="filter-range"
+        <button className="btn btn-primary w-100 mb-3" onClick={requestUserLocation}>
+          Определить мою геолокацию
+        </button>
+
+        {geoError && <div className="alert alert-warning py-2">{geoError}</div>}
+
+        {userLocation && (
+          <>
+            <label className="form-label fw-bold">
+              Радиус поиска: {radiusKm} км
+            </label>
+            <input
+              type="range"
+              min={1}
+              max={30}
+              step={1}
+              value={radiusKm}
+              onChange={(e) => setRadiusKm(Number(e.target.value))}
+              className="form-range mb-3"
+            />
+          </>
+        )}
+
+        <div className="mb-3">
+          <div className="fw-bold mb-2">Фильтр по топливу</div>
+          <SearchInput
+            value={fuelSearch}
+            onChange={setFuelSearch}
+            placeholder="Поиск топлива..."
           />
+
+          <div className="d-flex flex-column gap-2 mt-2">
+            {filteredFuelCodes.map((code) => (
+              <label key={code} className="d-flex align-items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedFuelCodes.includes(code)}
+                  onChange={() => toggleFuelCode(code)}
+                />
+                <span>{FUEL_LABELS[code] || code}</span>
+              </label>
+            ))}
+
+            {filteredFuelCodes.length === 0 && (
+              <div className="text-muted small">Ничего не найдено</div>
+            )}
+          </div>
         </div>
 
-        <div className="filter-group">
-          <label htmlFor="fuelFilter" className="filter-label">
-            Тип топлива
-          </label>
-          <select
-            id="fuelFilter"
-            value={selectedFuel}
-            onChange={(e) => setSelectedFuel(e.target.value)}
-            className="filter-select"
-          >
-            {fuelOptions.map((fuel) => (
-              <option key={fuel} value={fuel}>
-                {fuel === "all" ? "Все виды топлива" : fuel}
-              </option>
+        <div className="mb-3">
+          <div className="fw-bold mb-2">Фильтр по видам/сетям АЗС</div>
+          <SearchInput
+            value={stationGroupSearch}
+            onChange={setStationGroupSearch}
+            placeholder="Поиск вида АЗС..."
+          />
+
+          <div className="d-flex flex-column gap-2 mt-2">
+            {filteredStationGroupsForFilter.map((group) => (
+              <label key={group} className="d-flex align-items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selectedStationGroups.includes(group)}
+                  onChange={() => toggleStationGroup(group)}
+                />
+                <span>{group}</span>
+              </label>
             ))}
-          </select>
+
+            {filteredStationGroupsForFilter.length === 0 && (
+              <div className="text-muted small">Ничего не найдено</div>
+            )}
+          </div>
         </div>
 
-        <div className="filter-group">
-          <label htmlFor="brandFilter" className="filter-label">
-            Вид заправки / бренд
-          </label>
-          <select
-            id="brandFilter"
-            value={selectedBrand}
-            onChange={(e) => setSelectedBrand(e.target.value)}
-            className="filter-select"
-          >
-            {brandOptions.map((brand) => (
-              <option key={brand} value={brand}>
-                {brand === "all" ? "Все заправки" : brand}
-              </option>
-            ))}
-          </select>
+        <button className="btn btn-outline-secondary w-100 mb-3" onClick={resetFilters}>
+          Сбросить фильтры
+        </button>
+
+        <div className="text-muted small">
+          Найдено станций: {filteredStations.length}
         </div>
       </div>
 
-      <div className="map-layout">
-        <div ref={mapRef} className="map-canvas" />
+      {selectedStation && (
+        <div
+          className="position-absolute top-0 end-0 m-3 bg-white rounded shadow z-3"
+          style={{
+            width: 380,
+            maxHeight: "88vh",
+            overflowY: "auto",
+            padding: 20,
+          }}
+        >
+          <div className="d-flex justify-content-between align-items-start mb-3">
+            <h5 className="mb-0">{selectedStation.station.name || "АЗС"}</h5>
+            <button
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() => setSelectedStation(null)}
+            >
+              ✕
+            </button>
+          </div>
 
-        <aside className="station-sidebar">
-          {selectedStation ? (
-            <div className="station-card">
-              <div className="station-card-header">
-                <div>
-                  <h2 className="station-title">
-                    {selectedStation.properties.name ||
-                      selectedStation.properties.org_name ||
-                      "АЗС"}
-                  </h2>
-                  <p className="station-subtitle">
-                    {selectedStation.properties.brand || "Бренд не указан"}
-                  </p>
-                </div>
+          <div className="mb-2">
+            <strong>Адрес:</strong>{" "}
+            {selectedStation.station.full_address_name ||
+              selectedStation.station.address_name ||
+              "-"}
+          </div>
 
-                <button
-                  className="station-close-btn"
-                  onClick={handleClosePanel}
-                  type="button"
-                >
-                  ✕
-                </button>
-              </div>
+          <div className="mb-2">
+            <strong>Работает:</strong>{" "}
+            {selectedStation.details.is_operational ? "Да" : "Нет"}
+          </div>
 
-              <div className="station-section">
-                <h3>Основная информация</h3>
-                <p>
-                  <strong>Полное название:</strong>{" "}
-                  {selectedStation.properties.full_name || "Нет данных"}
-                </p>
-                <p>
-                  <strong>Адрес:</strong>{" "}
-                  {selectedStation.properties.full_address_name ||
-                    selectedStation.properties.address_name ||
-                    "Нет данных"}
-                </p>
-                <p>
-                  <strong>Бренд:</strong>{" "}
-                  {selectedStation.properties.brand || "Нет данных"}
-                </p>
-                <p>
-                  <strong>Режим работы:</strong>{" "}
-                  {selectedStation.properties.schedule_text || "Нет данных"}
-                </p>
-              </div>
+          <div className="mb-2">
+            <strong>Часы:</strong>{" "}
+            {selectedStation.details.working_hours ||
+              selectedStation.station.schedule_text_api ||
+              "-"}
+          </div>
 
-              <div className="station-section">
-                <h3>Типы топлива</h3>
-                {Array.isArray(selectedStation.properties.fuel_types) &&
-                selectedStation.properties.fuel_types.length > 0 ? (
-                  <div className="fuel-tags">
-                    {selectedStation.properties.fuel_types.map((fuel) => (
-                      <span key={fuel} className="fuel-tag">
-                        {fuel}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p>Нет данных</p>
-                )}
-              </div>
+          <div className="mb-3">
+            <strong>Колонки:</strong>{" "}
+            {selectedStation.details.columns_count ?? "-"}
+          </div>
 
-              <div className="station-section">
-                <h3>Категории</h3>
-                {Array.isArray(selectedStation.properties.rubrics) &&
-                selectedStation.properties.rubrics.length > 0 ? (
-                  <ul className="station-list">
-                    {selectedStation.properties.rubrics.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>Нет данных</p>
-                )}
-              </div>
-
-              <div className="station-section">
-                <h3>Описание</h3>
-                <p>{selectedStation.properties.description || "Нет данных"}</p>
-              </div>
-
-              <div className="station-section">
-                <h3>Координаты</h3>
-                <p>
-                  <strong>Долгота:</strong> {selectedStation.geometry.coordinates[0]}
-                </p>
-                <p>
-                  <strong>Широта:</strong> {selectedStation.geometry.coordinates[1]}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="station-card station-card-empty">
-              <h2>Информация об АЗС</h2>
-              <p>Нажми на заправку на карте, чтобы открыть подробную карточку.</p>
+          {selectedStation.details.main_photo_url && (
+            <div className="mb-3">
+              <img
+                src={selectedStation.details.main_photo_url}
+                alt="station"
+                style={{
+                  width: "100%",
+                  maxHeight: 180,
+                  objectFit: "cover",
+                  borderRadius: 12,
+                  border: "1px solid #e5e7eb",
+                }}
+              />
             </div>
           )}
-        </aside>
-      </div>
+
+          <div>
+            <div className="fw-bold mb-2">Топливо и цены</div>
+
+            {selectedStation.fuels.length === 0 ? (
+              <div className="text-muted">Данные по топливу не добавлены</div>
+            ) : (
+              <div className="d-flex flex-column gap-2">
+                {selectedStation.fuels.map((fuel) => (
+                  <div
+                    key={fuel.fuel_type_id}
+                    className="d-flex justify-content-between align-items-center border rounded px-3 py-2"
+                  >
+                    <span className="fw-semibold">{fuel.name}</span>
+                    <span>
+                      {fuel.price !== null && fuel.price !== undefined
+                        ? `${fuel.price} ₸/л`
+                        : "-"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selectedStationLoading && (
+        <div className="position-absolute top-0 end-0 m-3 alert alert-info z-3">
+          Загрузка данных станции...
+        </div>
+      )}
+
+      {loading && (
+        <div className="position-absolute top-0 end-0 m-3 alert alert-info z-3">
+          Загрузка АЗС...
+        </div>
+      )}
+
+      {error && (
+        <div className="position-absolute top-0 end-0 m-3 alert alert-danger z-3">
+          {error}
+        </div>
+      )}
+
+      <div
+        ref={mapContainerRef}
+        style={{ width: "100%", height: "100%" }}
+      />
     </div>
   );
 }
