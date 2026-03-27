@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/stations", tags=["stations"])
 async def get_2gis_stations(
     lat: float = Query(..., description="Широта пользователя"),
     lon: float = Query(..., description="Долгота пользователя"),
-    radius: int = Query(30000, ge=1000, le=100000, description="Радиус поиска в метрах"),
+    radius: int = Query(5000, ge=500, le=20000, description="Радиус поиска в метрах"),
 ):
     try:
         print("DGIS_API_KEY loaded:", bool(settings.DGIS_API_KEY))
@@ -19,6 +19,8 @@ async def get_2gis_stations(
             lon=lon,
             radius=radius,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print("ERROR IN /api/stations/2gis:", repr(e))
         raise HTTPException(status_code=500, detail=str(e))

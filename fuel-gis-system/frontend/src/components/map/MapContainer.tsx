@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type MapLayerMouseEvent } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -31,9 +31,7 @@ function getUserLocation(): Promise<{ lat: number; lon: number }> {
           lon: position.coords.longitude,
         });
       },
-      (error) => {
-        reject(error);
-      },
+      (error) => reject(error),
       {
         enableHighAccuracy: true,
         timeout: 10000,
@@ -43,14 +41,143 @@ function getUserLocation(): Promise<{ lat: number; lon: number }> {
   });
 }
 
+function radiusLabel(radiusMeters: number): string {
+  if (radiusMeters < 1000) {
+    return `${radiusMeters} м`;
+  }
+  return `${radiusMeters / 1000} км`;
+}
+
 export default function MapContainer() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const loadedRef = useRef(false);
-  const stationsDataRef = useRef<FuelStationsGeoJSON | null>(null);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const userLocationRef = useRef<{ lat: number; lon: number } | null>(null);
+  const allStationsRef = useRef<FuelStationsGeoJSON | null>(null);
+  const requestIdRef = useRef(0);
 
   const [status, setStatus] = useState("Инициализация карты...");
   const [selectedStation, setSelectedStation] = useState<FuelStationFeature | null>(null);
+
+  const [radius, setRadius] = useState(5000);
+  const [debouncedRadius, setDebouncedRadius] = useState(5000);
+
+  const [selectedFuel, setSelectedFuel] = useState("all");
+  const [selectedBrand, setSelectedBrand] = useState("all");
+
+  const [allStations, setAllStations] = useState<FuelStationFeature[]>([]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedRadius(radius);
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [radius]);
+
+  const brandOptions = useMemo(() => {
+    const brands = allStations
+      .map((item) => item.properties.brand || item.properties.org_name || "Без бренда")
+      .filter(Boolean);
+
+    return ["all", ...Array.from(new Set(brands)).sort((a, b) => a.localeCompare(b, "ru"))];
+  }, [allStations]);
+
+  const fuelOptions = useMemo(() => {
+    const fuels = allStations.flatMap((item) =>
+      Array.isArray(item.properties.fuel_types) ? item.properties.fuel_types : []
+    );
+
+    return ["all", ...Array.from(new Set(fuels)).sort((a, b) => a.localeCompare(b, "ru"))];
+  }, [allStations]);
+
+  useEffect(() => {
+    if (selectedBrand !== "all" && !brandOptions.includes(selectedBrand)) {
+      setSelectedBrand("all");
+    }
+  }, [brandOptions, selectedBrand]);
+
+  useEffect(() => {
+    if (selectedFuel !== "all" && !fuelOptions.includes(selectedFuel)) {
+      setSelectedFuel("all");
+    }
+  }, [fuelOptions, selectedFuel]);
+
+  const filteredStations = useMemo(() => {
+    return allStations.filter((station) => {
+      const brand = station.properties.brand || station.properties.org_name || "Без бренда";
+      const fuelTypes = Array.isArray(station.properties.fuel_types)
+        ? station.properties.fuel_types
+        : [];
+
+      const brandOk = selectedBrand === "all" || brand === selectedBrand;
+      const fuelOk =
+        selectedFuel === "all" ||
+        fuelTypes.some((fuel) => fuel.toLowerCase() === selectedFuel.toLowerCase());
+
+      return brandOk && fuelOk;
+    });
+  }, [allStations, selectedFuel, selectedBrand]);
+
+  async function loadStationsByUserLocation(newRadius: number) {
+    const map = mapInstanceRef.current;
+    const userLocation = userLocationRef.current;
+
+    if (!map || !userLocation) return;
+
+    const currentRequestId = ++requestIdRef.current;
+    setStatus(`Загрузка АЗС в радиусе ${radiusLabel(newRadius)}...`);
+
+    try {
+      const stationsData = await fetchFuelStationsByLocation(
+        userLocation.lat,
+        userLocation.lon,
+        newRadius
+      );
+
+      if (currentRequestId !== requestIdRef.current) {
+        return;
+      }
+
+      allStationsRef.current = stationsData;
+      setAllStations(stationsData.features);
+      setSelectedStation(null);
+
+      const fuelSource = map.getSource("fuel-stations") as maplibregl.GeoJSONSource | undefined;
+      if (fuelSource) {
+        fuelSource.setData({
+          type: "FeatureCollection",
+          features: stationsData.features.map((item) => ({
+            type: "Feature",
+            geometry: {
+              type: "Point",
+              coordinates: item.geometry.coordinates,
+            },
+            properties: {
+              id: item.properties.id,
+              name: item.properties.name,
+              brand: item.properties.brand,
+            },
+          })),
+        });
+      }
+
+      const selectedSource = map.getSource("selected-station") as maplibregl.GeoJSONSource | undefined;
+      if (selectedSource) {
+        selectedSource.setData(emptyFeatureCollection());
+      }
+
+      setStatus(`Загружено АЗС: ${stationsData.features.length}. Радиус: ${radiusLabel(newRadius)}`);
+    } catch (error) {
+      if (currentRequestId !== requestIdRef.current) {
+        return;
+      }
+
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : "Ошибка загрузки АЗС");
+    }
+  }
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
@@ -93,6 +220,7 @@ export default function MapContainer() {
         setStatus("Определение геолокации...");
 
         const { lat, lon } = await getUserLocation();
+        userLocationRef.current = { lat, lon };
 
         map.flyTo({
           center: [lon, lat],
@@ -101,18 +229,13 @@ export default function MapContainer() {
           essential: true,
         });
 
-        new maplibregl.Marker({ color: "#16a34a" })
+        userMarkerRef.current = new maplibregl.Marker({ color: "#16a34a" })
           .setLngLat([lon, lat])
           .addTo(map);
 
-        setStatus("Загрузка АЗС рядом с вами...");
-
-        const stationsData = await fetchFuelStationsByLocation(lat, lon, 30000);
-        stationsDataRef.current = stationsData;
-
         map.addSource("fuel-stations", {
           type: "geojson",
-          data: stationsData as GeoJSON.FeatureCollection<GeoJSON.Point>,
+          data: emptyFeatureCollection(),
         });
 
         map.addSource("selected-station", {
@@ -159,17 +282,14 @@ export default function MapContainer() {
           const clickedProps = clicked.properties as Record<string, unknown> | undefined;
           const clickedId = clickedProps?.id;
 
-          const rawData = stationsDataRef.current;
+          const rawData = allStationsRef.current;
           if (!rawData || clickedId == null) return;
 
           const originalFeature = rawData.features.find(
             (item) => String(item.properties.id) === String(clickedId)
           );
 
-          if (!originalFeature) {
-            console.warn("Станция не найдена в исходных данных:", clickedId);
-            return;
-          }
+          if (!originalFeature) return;
 
           setSelectedStation(originalFeature);
 
@@ -198,7 +318,7 @@ export default function MapContainer() {
           });
         });
 
-        setStatus(`Загружено АЗС рядом с вами: ${stationsData.features.length}`);
+        await loadStationsByUserLocation(debouncedRadius);
       } catch (error) {
         console.error("Fuel stations loading error:", error);
         setStatus("Не удалось определить геолокацию или загрузить АЗС");
@@ -208,10 +328,54 @@ export default function MapContainer() {
     mapInstanceRef.current = map;
 
     return () => {
+      userMarkerRef.current?.remove();
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const source = map.getSource("fuel-stations") as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+
+    source.setData({
+      type: "FeatureCollection",
+      features: filteredStations.map((item) => ({
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: item.geometry.coordinates,
+        },
+        properties: {
+          id: item.properties.id,
+          name: item.properties.name,
+          brand: item.properties.brand,
+        },
+      })),
+    });
+
+    if (selectedStation) {
+      const stillExists = filteredStations.some(
+        (item) => String(item.properties.id) === String(selectedStation.properties.id)
+      );
+
+      if (!stillExists) {
+        setSelectedStation(null);
+        const selectedSource = map.getSource("selected-station") as maplibregl.GeoJSONSource | undefined;
+        selectedSource?.setData(emptyFeatureCollection());
+      }
+    }
+  }, [filteredStations, selectedStation]);
+
+  useEffect(() => {
+    const userLocation = userLocationRef.current;
+    if (!userLocation) return;
+
+    loadStationsByUserLocation(debouncedRadius);
+  }, [debouncedRadius]);
 
   const handleClosePanel = () => {
     setSelectedStation(null);
@@ -220,15 +384,67 @@ export default function MapContainer() {
     if (!map) return;
 
     const selectedSource = map.getSource("selected-station") as maplibregl.GeoJSONSource | undefined;
-    if (!selectedSource) return;
-
-    selectedSource.setData(emptyFeatureCollection());
+    selectedSource?.setData(emptyFeatureCollection());
   };
 
   return (
     <div className="map-page">
       <div className="map-toolbar">
         <strong>STATUS:</strong> {status}
+      </div>
+
+      <div className="map-filters">
+        <div className="filter-group filter-group-radius">
+          <label htmlFor="radiusRange" className="filter-label">
+            Радиус поиска: <strong>{radiusLabel(radius)}</strong>
+          </label>
+          <input
+            id="radiusRange"
+            type="range"
+            min={1000}
+            max={15000}
+            step={1000}
+            value={radius}
+            onChange={(e) => setRadius(Number(e.target.value))}
+            className="filter-range"
+          />
+        </div>
+
+        <div className="filter-group">
+          <label htmlFor="fuelFilter" className="filter-label">
+            Тип топлива
+          </label>
+          <select
+            id="fuelFilter"
+            value={selectedFuel}
+            onChange={(e) => setSelectedFuel(e.target.value)}
+            className="filter-select"
+          >
+            {fuelOptions.map((fuel) => (
+              <option key={fuel} value={fuel}>
+                {fuel === "all" ? "Все виды топлива" : fuel}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="filter-group">
+          <label htmlFor="brandFilter" className="filter-label">
+            Вид заправки / бренд
+          </label>
+          <select
+            id="brandFilter"
+            value={selectedBrand}
+            onChange={(e) => setSelectedBrand(e.target.value)}
+            className="filter-select"
+          >
+            {brandOptions.map((brand) => (
+              <option key={brand} value={brand}>
+                {brand === "all" ? "Все заправки" : brand}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="map-layout">

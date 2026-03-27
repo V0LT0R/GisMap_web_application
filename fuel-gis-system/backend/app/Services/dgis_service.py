@@ -13,7 +13,7 @@ class DgisService:
         self,
         lat: float,
         lon: float,
-        radius: int = 30000,
+        radius: int = 5000,
     ) -> Dict[str, Any]:
         if not self.api_key:
             raise HTTPException(status_code=500, detail="DGIS_API_KEY is not configured")
@@ -21,30 +21,59 @@ class DgisService:
         url = f"{self.base_url}/items"
         point = f"{lon},{lat}"
 
-        params = {
-            "key": self.api_key,
-            "q": "АЗС",
-            "type": "branch",
-            "point": point,
-            "location": point,
-            "radius": radius,
-            "sort": "distance",
-            "page": 1,
-            "page_size": 10,
-            "fields": "items.point,items.address,items.full_address_name,items.schedule,items.rubrics,items.org,items.brand,items.description",
-        }
+        all_items: List[dict] = []
+        seen_ids: set[str] = set()
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, params=params)
-            print("2GIS STATUS:", response.status_code)
-            print("2GIS TEXT:", response.text[:1500])
-            response.raise_for_status()
-            payload = response.json()
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            for page in range(1, 4):  # меньше страниц = стабильнее
+                params = {
+                    "key": self.api_key,
+                    "q": "АЗС",
+                    "type": "branch",
+                    "point": point,
+                    "location": point,
+                    "radius": radius,
+                    "sort": "distance",
+                    "page": page,
+                    "page_size": 10,
+                    "fields": "items.point,items.address,items.full_address_name,items.schedule,items.rubrics,items.org,items.brand,items.description",
+                }
 
-        items = payload.get("result", {}).get("items", [])
+                try:
+                    response = await client.get(url, params=params)
+                    print(f"2GIS STATUS page {page}:", response.status_code)
+                    print("2GIS TEXT:", response.text[:800])
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"2GIS API error: {exc.response.status_code}"
+                    ) from exc
+                except httpx.HTTPError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"2GIS API unavailable: {str(exc)}"
+                    ) from exc
+
+                payload = response.json()
+                items = payload.get("result", {}).get("items", [])
+
+                if not items:
+                    break
+
+                for item in items:
+                    item_id = str(item.get("id"))
+                    if item_id in seen_ids:
+                        continue
+                    seen_ids.add(item_id)
+                    all_items.append(item)
+
+                if len(items) < 10:
+                    break
+
         features: List[Dict[str, Any]] = []
 
-        for item in items:
+        for item in all_items:
             point_obj = item.get("point") or {}
             item_lon = point_obj.get("lon")
             item_lat = point_obj.get("lat")

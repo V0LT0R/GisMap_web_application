@@ -32,7 +32,7 @@ const BACKEND_URL = "http://localhost:8000";
 export async function fetchFuelStationsByLocation(
   lat: number,
   lon: number,
-  radius = 30000
+  radius = 5000
 ): Promise<FuelStationsGeoJSON> {
   const params = new URLSearchParams({
     lat: String(lat),
@@ -46,7 +46,16 @@ export async function fetchFuelStationsByLocation(
   });
 
   if (!response.ok) {
-    throw new Error(`Backend request failed: ${response.status}`);
+    let detail = `Backend request failed: ${response.status}`;
+    try {
+      const err = await response.json();
+      if (err?.detail) {
+        detail = String(err.detail);
+      }
+    } catch {
+      // ignore json parse failure
+    }
+    throw new Error(detail);
   }
 
   return response.json();
