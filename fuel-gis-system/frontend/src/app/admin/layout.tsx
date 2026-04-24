@@ -1,7 +1,10 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import AdminSidebar from "@/components/admin/AdminSidebar";
+import { getMe } from "@/lib/api/auth";
+import { getToken, removeToken } from "@/lib/auth/token";
 
 function getPageTitle(pathname: string) {
   if (pathname === "/admin") return "Dashboard";
@@ -21,12 +24,47 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const title = getPageTitle(pathname);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   const isAuthPage =
     pathname === "/admin/login" ||
     pathname === "/admin/register" ||
     pathname === "/admin/verify";
+
+  useEffect(() => {
+    if (isAuthPage) {
+      setCheckingAuth(false);
+      return;
+    }
+
+    const token = getToken();
+    if (!token) {
+      router.replace(`/admin/login?next=${encodeURIComponent(pathname)}`);
+      return;
+    }
+
+    getMe(token)
+      .then((user) => {
+        if (user.role !== "admin" && user.role !== "super_admin") {
+          removeToken();
+          router.replace("/admin/login");
+          return;
+        }
+
+        if (pathname === "/admin/users" && user.role !== "super_admin") {
+          router.replace("/admin/stations");
+          return;
+        }
+
+        setCheckingAuth(false);
+      })
+      .catch(() => {
+        removeToken();
+        router.replace(`/admin/login?next=${encodeURIComponent(pathname)}`);
+      });
+  }, [isAuthPage, pathname, router]);
 
   if (isAuthPage) {
     return (
@@ -38,6 +76,14 @@ export default function AdminLayout({
         }}
       >
         {children}
+      </div>
+    );
+  }
+
+  if (checkingAuth) {
+    return (
+      <div className="d-flex align-items-center justify-content-center" style={{ minHeight: "100vh" }}>
+        <div className="alert alert-info mb-0">Проверка авторизации...</div>
       </div>
     );
   }

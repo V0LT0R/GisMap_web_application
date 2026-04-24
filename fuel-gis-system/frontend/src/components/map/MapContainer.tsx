@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -126,6 +127,18 @@ function buildFuelHtml(data: StationFull) {
   `;
 }
 
+function buildVisitForecastPlaceholderHtml() {
+  return `
+    <div style="margin-top:12px;padding:12px;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff;">
+      <div style="font-weight:700;margin-bottom:6px;">Когда лучше посетить АЗС</div>
+      <div style="color:#475569;line-height:1.45;">
+        Заглушка для ML-прогноза. Здесь позже будет показано рекомендуемое время визита с учетом
+        загруженности, очередей и доступности топлива.
+      </div>
+    </div>
+  `;
+}
+
 function buildPopupHtml(data: StationFull) {
   return `
     <div style="
@@ -156,6 +169,7 @@ function buildPopupHtml(data: StationFull) {
       </div>
 
       ${buildFuelHtml(data)}
+      ${buildVisitForecastPlaceholderHtml()}
     </div>
   `;
 }
@@ -537,6 +551,14 @@ export default function MapContainer() {
       className="position-relative"
       style={{ width: "100%", height: "100vh" }}
     >
+      <Link
+        href="/admin/login"
+        className="btn btn-primary position-absolute top-0 end-0 m-3 z-3"
+        style={{ borderRadius: 999, boxShadow: "0 6px 18px rgba(37,99,235,0.25)" }}
+      >
+        Войти
+      </Link>
+
       <div
         className="position-absolute top-0 start-0 m-3 p-3 bg-white rounded shadow z-3"
         style={{ width: 340, maxHeight: "85vh", overflowY: "auto" }}
@@ -709,6 +731,14 @@ export default function MapContainer() {
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="mt-3 border rounded-4 p-3" style={{ background: "#f8fbff", borderColor: "#dbeafe" }}>
+            <div className="fw-bold mb-2">Когда лучше посетить АЗС</div>
+            <div className="text-muted small">
+              Заглушка для будущего ML-модуля. Здесь позже будет показано оптимальное время визита
+              на основе прогнозной загруженности, очередей и доступности топлива.
+            </div>
           </div>
         </div>
       )}

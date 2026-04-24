@@ -5,7 +5,7 @@ import type {
 } from "@/types/station";
 import type { FuelType, StationFuelItemUpdate } from "@/types/fuel";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export async function getStations(search?: string): Promise<StationListItem[]> {
   const url = new URL(`${API_URL}/api/stations`);

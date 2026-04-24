@@ -21,7 +21,9 @@ export default function LoginForm() {
 
       const data = await login({ email, password });
       saveToken(data.access_token);
-      router.push("/admin");
+      const params = new URLSearchParams(window.location.search);
+      const nextPath = params.get("next") || "/admin";
+      router.push(nextPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка входа");
     } finally {

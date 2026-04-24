@@ -16,6 +16,34 @@ from app.models.station_fuel import StationFuel
 app = FastAPI(title="Fuel GIS Backend")
 
 
+# Дополнительный CORS-слой: браузер иногда показывает ошибку CORS
+# вместо реального 401/403 ответа. Этот middleware принудительно добавляет
+# CORS-заголовки ко всем ответам, включая ошибки авторизации.
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    origin = request.headers.get("origin")
+    allowed_origins = {
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    }
+
+    if request.method == "OPTIONS":
+        from starlette.responses import Response
+
+        response = Response(status_code=204)
+    else:
+        response = await call_next(request)
+
+    if origin in allowed_origins or (origin and origin.startswith("http://localhost:")) or (origin and origin.startswith("http://127.0.0.1:")):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization,Content-Type,Accept,Origin"
+        response.headers["Vary"] = "Origin"
+
+    return response
+
+
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
@@ -28,7 +56,13 @@ def root():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # Разрешаем оба варианта адреса frontend, потому что браузер может открывать
+    # страницу как localhost:3000, а API вызываться на 127.0.0.1:8000.
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

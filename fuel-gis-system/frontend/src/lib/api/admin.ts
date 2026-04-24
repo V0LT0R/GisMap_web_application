@@ -1,4 +1,7 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import type { AdminUser } from "@/types/user";
+import type { StationListItem } from "@/types/station";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export async function createAdminInvite(
   token: string,
@@ -21,11 +24,27 @@ export async function createAdminInvite(
   return res.json();
 }
 
-export async function assignStationsToAdmin(
+export async function getAdminUsers(token: string): Promise<AdminUser[]> {
+  const res = await fetch(`${API_URL}/api/admin/users`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const data = await safeJson(res);
+    throw new Error(data?.detail || "Не удалось загрузить пользователей");
+  }
+
+  return res.json();
+}
+
+export async function createAdminUser(
   token: string,
-  payload: { admin_user_id: number; station_ids: number[] }
-) {
-  const res = await fetch(`${API_URL}/api/admin/stations/assign`, {
+  payload: { email: string; password: string; is_active?: boolean; is_email_verified?: boolean }
+): Promise<AdminUser> {
+  const res = await fetch(`${API_URL}/api/admin/users`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -36,7 +55,45 @@ export async function assignStationsToAdmin(
 
   if (!res.ok) {
     const data = await safeJson(res);
-    throw new Error(data?.detail || "Не удалось назначить станции");
+    throw new Error(data?.detail || "Не удалось создать admin");
+  }
+
+  return res.json();
+}
+
+export async function replaceAdminStations(
+  token: string,
+  adminUserId: number,
+  stationIds: number[]
+) {
+  const res = await fetch(`${API_URL}/api/admin/users/${adminUserId}/stations`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ station_ids: stationIds }),
+  });
+
+  if (!res.ok) {
+    const data = await safeJson(res);
+    throw new Error(data?.detail || "Не удалось сохранить назначение станций");
+  }
+
+  return res.json();
+}
+
+export async function getAllStationsForAdmin(token: string): Promise<StationListItem[]> {
+  const res = await fetch(`${API_URL}/api/stations`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const data = await safeJson(res);
+    throw new Error(data?.detail || "Не удалось загрузить станции");
   }
 
   return res.json();
