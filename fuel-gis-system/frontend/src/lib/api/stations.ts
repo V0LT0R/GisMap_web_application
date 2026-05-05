@@ -145,3 +145,38 @@ async function safeJson(res: Response) {
     return null;
   }
 }
+export type NavigationRoute = {
+  geometry: {
+    type: "LineString";
+    coordinates: [number, number][];
+  };
+  distance_m?: number | null;
+  duration_s?: number | null;
+  ui_distance?: { value?: string; unit?: string } | null;
+  ui_duration?: string | null;
+};
+
+export async function getNavigationRoute(params: {
+  start: { lat: number; lon: number };
+  end: { lat: number; lon: number };
+  transport?: "driving" | "walking";
+}): Promise<NavigationRoute> {
+  const res = await fetch(`${API_URL}/api/navigation/route`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      start: params.start,
+      end: params.end,
+      transport: params.transport || "driving",
+    }),
+  });
+
+  if (!res.ok) {
+    const data = await safeJson(res);
+    throw new Error(data?.detail || "Не удалось построить маршрут");
+  }
+
+  return res.json();
+}

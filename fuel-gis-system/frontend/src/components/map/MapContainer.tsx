@@ -6,7 +6,7 @@ import maplibregl, { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import SearchInput from "@/components/common/SearchInput";
-import { getStationPublicById, getStations } from "@/lib/api/stations";
+import { getNavigationRoute, getStationPublicById, getStations } from "@/lib/api/stations";
 import type { StationFull, StationListItem } from "@/types/station";
 
 type UserLocation = {
@@ -179,6 +179,7 @@ export default function MapContainer() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const routePopupRef = useRef<maplibregl.Popup | null>(null);
 
   const [stations, setStations] = useState<StationListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -199,6 +200,9 @@ export default function MapContainer() {
     null
   );
   const [selectedStationLoading, setSelectedStationLoading] = useState(false);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState("");
+  const [routeInfo, setRouteInfo] = useState<{ distance?: string; duration?: string } | null>(null);
 
   useEffect(() => {
     const loadStations = async () => {
@@ -373,6 +377,25 @@ export default function MapContainer() {
           },
         });
       }
+      if (!map.getSource("station-route")) {
+        map.addSource("station-route", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
+        map.addLayer({
+          id: "station-route-line",
+          type: "line",
+          source: "station-route",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#0d6efd",
+            "line-width": 5,
+            "line-opacity": 0.9,
+          },
+        });
+      }
+
     });
 
     mapRef.current = map;
@@ -382,6 +405,8 @@ export default function MapContainer() {
       markersRef.current = [];
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
+      routePopupRef.current?.remove();
+      routePopupRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -488,6 +513,8 @@ export default function MapContainer() {
       el.addEventListener("click", async () => {
         try {
           setSelectedStationLoading(true);
+          setRouteInfo(null);
+          setRouteError("");
           const details = await getStationPublicById(station.id);
           setSelectedStation(details);
         } catch {
@@ -525,6 +552,120 @@ export default function MapContainer() {
       });
     }
   }, [filteredStations, userLocation]);
+
+  const clearRoute = () => {
+    const map = mapRef.current;
+    const source = map?.getSource("station-route") as GeoJSONSource | undefined;
+
+    if (source) {
+      source.setData({
+        type: "FeatureCollection",
+        features: [],
+      } as never);
+    }
+
+    routePopupRef.current?.remove();
+    routePopupRef.current = null;
+    setRouteInfo(null);
+    setRouteError("");
+  };
+
+  const buildRouteToSelectedStation = async () => {
+    if (!selectedStation) return;
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (!userLocation) {
+      setRouteError("Сначала нажмите «Определить мою геолокацию»");
+      return;
+    }
+
+    const stationLat = selectedStation.station.latitude;
+    const stationLon = selectedStation.station.longitude;
+
+    if (stationLat == null || stationLon == null) {
+      setRouteError("У этой АЗС нет координат для построения маршрута");
+      return;
+    }
+
+    try {
+      setRouteLoading(true);
+      setRouteError("");
+
+      const route = await getNavigationRoute({
+        start: { lat: userLocation.latitude, lon: userLocation.longitude },
+        end: { lat: stationLat, lon: stationLon },
+        transport: "driving",
+      });
+
+      const source = map.getSource("station-route") as GeoJSONSource | undefined;
+      if (source) {
+        source.setData({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: route.geometry,
+              properties: {},
+            },
+          ],
+        } as never);
+      }
+
+      const bounds = new maplibregl.LngLatBounds();
+      route.geometry.coordinates.forEach((coord) => bounds.extend(coord));
+
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, {
+          padding: { top: 100, right: 430, bottom: 100, left: 380 },
+          maxZoom: 15,
+          duration: 700,
+        });
+      }
+
+      const distance = route.ui_distance
+        ? `${route.ui_distance.value} ${route.ui_distance.unit || "км"}`
+        : route.distance_m
+          ? `${(route.distance_m / 1000).toFixed(1)} км`
+          : undefined;
+
+      const duration = route.ui_duration
+        ? route.ui_duration
+        : route.duration_s
+          ? `${Math.round(route.duration_s / 60)} мин`
+          : undefined;
+
+      setRouteInfo({ distance, duration });
+
+      routePopupRef.current?.remove();
+      routePopupRef.current = new maplibregl.Popup({ offset: 18 })
+        .setLngLat([stationLon, stationLat])
+        .setHTML(`
+          <div style="font-family:Arial,sans-serif;font-size:14px;min-width:190px;">
+            <div style="font-weight:700;margin-bottom:6px;">Маршрут до АЗС</div>
+            <div>Расстояние: ${distance || "-"}</div>
+            <div>Время: ${duration || "-"}</div>
+          </div>
+        `)
+        .addTo(map);
+    } catch (err) {
+      setRouteError(err instanceof Error ? err.message : "Не удалось построить маршрут");
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
+  const openIn2Gis = () => {
+    if (!selectedStation || !userLocation) return;
+
+    const stationLat = selectedStation.station.latitude;
+    const stationLon = selectedStation.station.longitude;
+    if (stationLat == null || stationLon == null) return;
+
+    const url = `https://2gis.kz/astana/directions/points/${userLocation.longitude},${userLocation.latitude};${stationLon},${stationLat}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   const toggleFuelCode = (code: string) => {
     setSelectedFuelCodes((prev) =>
@@ -663,7 +804,10 @@ export default function MapContainer() {
             <h5 className="mb-0">{selectedStation.station.name || "АЗС"}</h5>
             <button
               className="btn btn-sm btn-outline-secondary"
-              onClick={() => setSelectedStation(null)}
+              onClick={() => {
+                setSelectedStation(null);
+                clearRoute();
+              }}
             >
               ✕
             </button>
@@ -691,6 +835,33 @@ export default function MapContainer() {
           <div className="mb-3">
             <strong>Колонки:</strong>{" "}
             {selectedStation.details.columns_count ?? "-"}
+          </div>
+
+          <div className="border rounded-4 p-3 mb-3" style={{ background: "#f8fbff", borderColor: "#dbeafe" }}>
+            <div className="fw-bold mb-2">Навигация до АЗС</div>
+            <div className="d-flex gap-2 mb-2">
+              <button
+                className="btn btn-primary flex-fill"
+                onClick={buildRouteToSelectedStation}
+                disabled={routeLoading}
+              >
+                {routeLoading ? "Строю..." : "Построить маршрут"}
+              </button>
+
+            </div>
+
+            {routeInfo && (
+              <div className="small text-muted">
+                {routeInfo.distance && <div>Расстояние: {routeInfo.distance}</div>}
+                {routeInfo.duration && <div>Время в пути: {routeInfo.duration}</div>}
+              </div>
+            )}
+
+            {routeError && <div className="text-danger small">{routeError}</div>}
+
+            <button className="btn btn-sm btn-link p-0 mt-2" onClick={clearRoute}>
+              Очистить маршрут
+            </button>
           </div>
 
           {selectedStation.details.main_photo_url && (
