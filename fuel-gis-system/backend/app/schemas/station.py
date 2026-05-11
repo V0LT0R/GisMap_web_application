@@ -39,6 +39,16 @@ class StationDetailsUpdate(BaseModel):
     main_photo_url: str | None = Field(default=None, max_length=1000)
 
 
+class StationFuelListItemOut(BaseModel):
+    fuel_type_id: int
+    code: str
+    name: str
+    is_available: bool = True
+    price: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class StationListItemOut(BaseModel):
     id: int
     name: str | None = None
@@ -52,7 +62,8 @@ class StationListItemOut(BaseModel):
     working_hours: str | None = None
     columns_count: int | None = None
     main_photo_url: str | None = None
-    fuel_codes: list[str] = []
+    fuel_codes: list[str] = Field(default_factory=list)
+    fuels: list[StationFuelListItemOut] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AdminUser } from "@/types/user";
 import type { StationListItem } from "@/types/station";
 import { getToken } from "@/lib/auth/token";
@@ -16,13 +16,13 @@ export default function UserAssignStations({
   stations: StationListItem[];
   onSaved: () => Promise<void> | void;
 }) {
-  const assignableAdmins = admins.filter((user) => user.role === "admin");
-  const [selectedAdminId, setSelectedAdminId] = useState<number | null>(
-    assignableAdmins[0]?.id ?? null
+  const assignableAdmins = useMemo(
+    () => admins.filter((user) => user.role === "admin"),
+    [admins]
   );
-  const [selectedStationIds, setSelectedStationIds] = useState<number[]>(
-    assignableAdmins[0]?.assigned_station_ids ?? []
-  );
+
+  const [selectedAdminId, setSelectedAdminId] = useState<number | null>(null);
+  const [selectedStationIds, setSelectedStationIds] = useState<number[]>([]);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -33,22 +33,44 @@ export default function UserAssignStations({
     [assignableAdmins, selectedAdminId]
   );
 
+  useEffect(() => {
+    if (assignableAdmins.length === 0) {
+      setSelectedAdminId(null);
+      setSelectedStationIds([]);
+      return;
+    }
+
+    const currentAdmin =
+      assignableAdmins.find((admin) => admin.id === selectedAdminId) ??
+      assignableAdmins[0];
+
+    setSelectedAdminId(currentAdmin.id);
+    setSelectedStationIds(currentAdmin.assigned_station_ids ?? []);
+  }, [assignableAdmins, selectedAdminId]);
+
   const filteredStations = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return stations;
 
     return stations.filter((station) => {
-      const text = [station.name, station.brand, station.address_name, station.full_address_name]
+      const text = [
+        station.name,
+        station.brand,
+        station.address_name,
+        station.full_address_name,
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
+
       return text.includes(query);
     });
   }, [search, stations]);
 
   const handleAdminChange = (adminId: number) => {
-    setSelectedAdminId(adminId);
     const admin = assignableAdmins.find((item) => item.id === adminId);
+
+    setSelectedAdminId(adminId);
     setSelectedStationIds(admin?.assigned_station_ids ?? []);
     setMessage("");
     setError("");
@@ -63,7 +85,10 @@ export default function UserAssignStations({
   };
 
   const handleSave = async () => {
-    if (!selectedAdminId) return;
+    if (!selectedAdminId) {
+      setError("Выберите admin");
+      return;
+    }
 
     setMessage("");
     setError("");
@@ -72,11 +97,19 @@ export default function UserAssignStations({
     try {
       const token = getToken();
       if (!token) throw new Error("Нет токена авторизации");
-      const data = await replaceAdminStations(token, selectedAdminId, selectedStationIds);
+
+      const data = await replaceAdminStations(
+        token,
+        selectedAdminId,
+        selectedStationIds
+      );
+
       setMessage(data.message);
       await onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка сохранения назначений");
+      setError(
+        err instanceof Error ? err.message : "Ошибка сохранения назначений"
+      );
     } finally {
       setLoading(false);
     }
@@ -122,10 +155,16 @@ export default function UserAssignStations({
             />
           </div>
 
-          <div className="border rounded p-2" style={{ maxHeight: 430, overflowY: "auto" }}>
+          <div
+            className="border rounded p-2"
+            style={{ maxHeight: 430, overflowY: "auto" }}
+          >
             <div className="d-flex flex-column gap-2">
               {filteredStations.map((station) => (
-                <label key={station.id} className="border rounded px-3 py-2 d-flex gap-2 align-items-start">
+                <label
+                  key={station.id}
+                  className="border rounded px-3 py-2 d-flex gap-2 align-items-start"
+                >
                   <input
                     type="checkbox"
                     checked={selectedStationIds.includes(station.id)}
@@ -133,9 +172,13 @@ export default function UserAssignStations({
                     style={{ marginTop: 4 }}
                   />
                   <span>
-                    <span className="fw-semibold d-block">{station.name || "АЗС"}</span>
+                    <span className="fw-semibold d-block">
+                      {station.name || "АЗС"}
+                    </span>
                     <span className="small text-muted d-block">
-                      {station.full_address_name || station.address_name || "Адрес не указан"}
+                      {station.full_address_name ||
+                        station.address_name ||
+                        "Адрес не указан"}
                     </span>
                   </span>
                 </label>
@@ -148,9 +191,16 @@ export default function UserAssignStations({
           </div>
 
           <div className="d-flex justify-content-between align-items-center mt-3">
-            <div className="small text-muted">Выбрано: {selectedStationIds.length}</div>
-            <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
-              {loading ? "Сохранение..." : "Сохранить назначения"}
+            <div className="small text-muted">
+              Выбрано: {selectedStationIds.length}
+            </div>
+
+            <button
+              className="btn btn-primary"
+              onClick={handleSave}
+              disabled={loading || !selectedAdminId}
+            >
+              {loading ? "Сохраняю..." : "Сохранить назначения"}
             </button>
           </div>
         </>

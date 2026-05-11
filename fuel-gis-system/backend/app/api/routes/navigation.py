@@ -45,9 +45,7 @@ def _parse_linestring(value: str) -> list[list[float]]:
 def _extract_route_geometry(route: dict) -> list[list[float]]:
     coords: list[list[float]] = []
 
-    for key in ("begin_pedestrian_path", "end_pedestrian_path"):
-        selection = ((route.get(key) or {}).get("geometry") or {}).get("selection")
-        coords.extend(_parse_linestring(selection))
+    
 
     for maneuver in route.get("maneuvers") or []:
         outcoming_path = maneuver.get("outcoming_path") or {}

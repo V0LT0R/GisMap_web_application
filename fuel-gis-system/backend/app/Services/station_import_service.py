@@ -27,6 +27,26 @@ ASTANA_GRID_POINTS = [
     (51.2294, 71.5291),
 ]
 
+ALMATY_GRID_POINTS = [
+    (43.2389, 76.8897),
+    (43.2389, 76.8497),
+    (43.2389, 76.9297),
+    (43.2089, 76.8897),
+    (43.2689, 76.8897),
+    (43.2089, 76.8497),
+    (43.2089, 76.9297),
+    (43.2689, 76.8497),
+    (43.2689, 76.9297),
+    (43.1789, 76.8897),
+    (43.2989, 76.8897),
+    (43.2389, 76.8097),
+    (43.2389, 76.9697),
+    (43.1789, 76.8097),
+    (43.1789, 76.9697),
+    (43.2989, 76.8097),
+    (43.2989, 76.9697),
+]
+
 
 class StationImportService:
     def __init__(self, db: Session):
@@ -114,9 +134,9 @@ class StationImportService:
         return station, created
 
     def import_from_grid(
-        self,
-        points: Iterable[tuple[float, float]] = ASTANA_GRID_POINTS,
-        radius: int = 6000,
+    self,
+    points: Iterable[tuple[float, float]] = ASTANA_GRID_POINTS + ALMATY_GRID_POINTS,
+    radius: int = 6000,
     ) -> dict:
         created_count = 0
         updated_count = 0

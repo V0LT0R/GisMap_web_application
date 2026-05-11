@@ -1,3 +1,11 @@
+export type StationListFuel = {
+  fuel_type_id: number;
+  code: string;
+  name: string;
+  is_available: boolean;
+  price?: number | null;
+};
+
 export type StationListItem = {
   id: number;
   name?: string | null;
@@ -12,6 +20,7 @@ export type StationListItem = {
   columns_count?: number | null;
   main_photo_url?: string | null;
   fuel_codes: string[];
+  fuels?: StationListFuel[];
 };
 
 export type StationBase = {

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { removeToken } from "@/lib/auth/token";
 
 const links = [
+  { href: "/", label: "Назад на карту" },
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/stations", label: "Станции" },
   { href: "/admin/users", label: "Пользователи" },

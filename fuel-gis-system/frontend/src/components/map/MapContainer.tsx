@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -13,6 +13,31 @@ type UserLocation = {
   latitude: number;
   longitude: number;
 };
+
+type FuelPriceRange = {
+  min: number;
+  max: number;
+};
+
+type StationMarkerEntry = {
+  marker: maplibregl.Marker;
+  markerEl: HTMLDivElement;
+  labelEl: HTMLDivElement;
+};
+
+type ScreenBox = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+const DEFAULT_FUEL_PRICE_MIN = 200;
+const DEFAULT_FUEL_PRICE_MAX = 400;
+const FUEL_PRICE_STEP = 5;
+const STATION_LABEL_MIN_ZOOM = 13;
+const OSM_RASTER_MAX_ZOOM = 19;
+const MAP_MAX_ZOOM = 19;
 
 const FUEL_LABELS: Record<string, string> = {
   AI_80: "АИ-80",
@@ -34,6 +59,46 @@ function getStationGroup(station: StationListItem): string {
   if (!rawName) return "Без бренда";
 
   return rawName.split(",")[0].trim() || "Без бренда";
+}
+
+function getStationMapLabel(station: StationListItem): string {
+  const brand = station.brand?.trim();
+  if (brand) return brand;
+
+  const name = station.name?.trim();
+  if (!name) return "АЗС";
+
+  return name.replace(/\s+/g, " ");
+}
+
+function rectToScreenBox(rect: DOMRect, containerRect: DOMRect): ScreenBox {
+  return {
+    left: rect.left - containerRect.left,
+    top: rect.top - containerRect.top,
+    right: rect.right - containerRect.left,
+    bottom: rect.bottom - containerRect.top,
+  };
+}
+
+function boxesIntersect(a: ScreenBox, b: ScreenBox, gap = 0): boolean {
+  return !(
+    a.right + gap < b.left ||
+    a.left - gap > b.right ||
+    a.bottom + gap < b.top ||
+    a.top - gap > b.bottom
+  );
+}
+
+function getFuelPriceRange(
+  ranges: Record<string, FuelPriceRange>,
+  code: string
+): FuelPriceRange {
+  return (
+    ranges[code] || {
+      min: DEFAULT_FUEL_PRICE_MIN,
+      max: DEFAULT_FUEL_PRICE_MAX,
+    }
+  );
 }
 
 function toRad(value: number) {
@@ -178,6 +243,8 @@ export default function MapContainer() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const stationMarkerEntriesRef = useRef<StationMarkerEntry[]>([]);
+  const stationLabelRafRef = useRef<number | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const routePopupRef = useRef<maplibregl.Popup | null>(null);
 
@@ -190,6 +257,7 @@ export default function MapContainer() {
   const [radiusKm, setRadiusKm] = useState(5);
 
   const [selectedFuelCodes, setSelectedFuelCodes] = useState<string[]>([]);
+  const [fuelPriceRange, setFuelPriceRange] = useState<Record<string, FuelPriceRange>>({});
   const [selectedStationGroups, setSelectedStationGroups] = useState<string[]>(
     []
   );
@@ -203,6 +271,67 @@ export default function MapContainer() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState("");
   const [routeInfo, setRouteInfo] = useState<{ distance?: string; duration?: string } | null>(null);
+
+  const updateStationLabels = useCallback(() => {
+    const map = mapRef.current;
+    const entries = stationMarkerEntriesRef.current;
+
+    if (!map || entries.length === 0) return;
+
+    const shouldShowLabels = map.getZoom() >= STATION_LABEL_MIN_ZOOM;
+
+    entries.forEach((entry) => {
+      entry.labelEl.style.display = shouldShowLabels ? "block" : "none";
+      entry.labelEl.style.visibility = "hidden";
+    });
+
+    if (!shouldShowLabels) return;
+
+    const containerRect = map.getContainer().getBoundingClientRect();
+    const mapWidth = containerRect.width;
+    const mapHeight = containerRect.height;
+
+    const markerBoxes = entries.map((entry) =>
+      rectToScreenBox(entry.markerEl.getBoundingClientRect(), containerRect)
+    );
+    const visibleLabelBoxes: ScreenBox[] = [];
+
+    entries.forEach((entry, index) => {
+      const labelBox = rectToScreenBox(
+        entry.labelEl.getBoundingClientRect(),
+        containerRect
+      );
+
+      const isOutsideMap =
+        labelBox.right < 0 ||
+        labelBox.left > mapWidth ||
+        labelBox.bottom < 0 ||
+        labelBox.top > mapHeight;
+
+      if (isOutsideMap) return;
+
+      const overlapsAnotherMarker = markerBoxes.some((markerBox, markerIndex) =>
+        markerIndex !== index && boxesIntersect(labelBox, markerBox, 4)
+      );
+      const overlapsVisibleLabel = visibleLabelBoxes.some((visibleBox) =>
+        boxesIntersect(labelBox, visibleBox, 6)
+      );
+
+      if (!overlapsAnotherMarker && !overlapsVisibleLabel) {
+        entry.labelEl.style.visibility = "visible";
+        visibleLabelBoxes.push(labelBox);
+      }
+    });
+  }, []);
+
+  const scheduleStationLabelUpdate = useCallback(() => {
+    if (stationLabelRafRef.current !== null) return;
+
+    stationLabelRafRef.current = window.requestAnimationFrame(() => {
+      stationLabelRafRef.current = null;
+      updateStationLabels();
+    });
+  }, [updateStationLabels]);
 
   useEffect(() => {
     const loadStations = async () => {
@@ -299,9 +428,18 @@ export default function MapContainer() {
       }
 
       if (selectedFuelCodes.length > 0) {
-        const codes = station.fuel_codes || [];
-        const hasFuel = selectedFuelCodes.every((code) => codes.includes(code));
-        if (!hasFuel) return false;
+        const fuels = station.fuels || [];
+
+        const hasSelectedFuelWithCorrectPrice = selectedFuelCodes.every((code) => {
+          const range = getFuelPriceRange(fuelPriceRange, code);
+          const fuel = fuels.find((item) => item.code === code && item.is_available);
+
+          if (!fuel || fuel.price == null) return false;
+
+          return fuel.price >= range.min && fuel.price <= range.max;
+        });
+
+        if (!hasSelectedFuelWithCorrectPrice) return false;
       }
 
       if (selectedStationGroups.length > 0) {
@@ -311,7 +449,14 @@ export default function MapContainer() {
 
       return true;
     });
-  }, [stations, userLocation, radiusKm, selectedFuelCodes, selectedStationGroups]);
+  }, [
+    stations,
+    userLocation,
+    radiusKm,
+    selectedFuelCodes,
+    selectedStationGroups,
+    fuelPriceRange,
+  ]);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -329,6 +474,7 @@ export default function MapContainer() {
               "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
             ],
             tileSize: 256,
+            maxzoom: OSM_RASTER_MAX_ZOOM,
             attribution: "© OpenStreetMap contributors",
           },
         },
@@ -342,9 +488,14 @@ export default function MapContainer() {
       },
       center: [71.4491, 51.1694],
       zoom: 11.5,
+      maxZoom: MAP_MAX_ZOOM,
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.on("move", scheduleStationLabelUpdate);
+    map.on("zoom", scheduleStationLabelUpdate);
+    map.on("resize", scheduleStationLabelUpdate);
+    map.on("idle", scheduleStationLabelUpdate);
 
     map.on("load", () => {
       if (!map.getSource("search-radius")) {
@@ -401,8 +552,19 @@ export default function MapContainer() {
     mapRef.current = map;
 
     return () => {
+      map.off("move", scheduleStationLabelUpdate);
+      map.off("zoom", scheduleStationLabelUpdate);
+      map.off("resize", scheduleStationLabelUpdate);
+      map.off("idle", scheduleStationLabelUpdate);
+
+      if (stationLabelRafRef.current !== null) {
+        window.cancelAnimationFrame(stationLabelRafRef.current);
+        stationLabelRafRef.current = null;
+      }
+
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current = [];
+      stationMarkerEntriesRef.current = [];
       userMarkerRef.current?.remove();
       userMarkerRef.current = null;
       routePopupRef.current?.remove();
@@ -410,7 +572,7 @@ export default function MapContainer() {
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [scheduleStationLabelUpdate]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -476,6 +638,7 @@ export default function MapContainer() {
 
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
+    stationMarkerEntriesRef.current = [];
 
     filteredStations.forEach((station) => {
       if (station.latitude == null || station.longitude == null) return;
@@ -488,6 +651,7 @@ export default function MapContainer() {
         try {
           const details = await getStationPublicById(station.id);
           popup.setHTML(buildPopupHtml(details));
+          
         } catch {
           popup.setHTML(`
             <div style="min-width:240px;">
@@ -501,14 +665,18 @@ export default function MapContainer() {
       });
 
       const el = document.createElement("div");
-      el.className = "station-marker";
-      el.style.width = "14px";
-      el.style.height = "14px";
-      el.style.borderRadius = "50%";
-      el.style.backgroundColor = station.is_operational ? "#dc3545" : "#6c757d";
-      el.style.border = "2px solid white";
-      el.style.boxShadow = "0 0 6px rgba(0,0,0,0.35)";
-      el.style.cursor = "pointer";
+      el.className = "station-marker-shell";
+
+      const markerEl = document.createElement("div");
+      markerEl.className = "station-marker";
+      markerEl.style.backgroundColor = station.is_operational ? "#dc3545" : "#6c757d";
+
+      const labelEl = document.createElement("div");
+      labelEl.className = "station-marker-label";
+      labelEl.textContent = getStationMapLabel(station);
+
+      el.appendChild(markerEl);
+      el.appendChild(labelEl);
 
       el.addEventListener("click", async () => {
         try {
@@ -530,6 +698,7 @@ export default function MapContainer() {
         .addTo(map);
 
       markersRef.current.push(marker);
+      stationMarkerEntriesRef.current.push({ marker, markerEl, labelEl });
     });
 
     const bounds = new maplibregl.LngLatBounds();
@@ -551,7 +720,9 @@ export default function MapContainer() {
         duration: 700,
       });
     }
-  }, [filteredStations, userLocation]);
+
+    scheduleStationLabelUpdate();
+  }, [filteredStations, userLocation, scheduleStationLabelUpdate]);
 
   const clearRoute = () => {
     const map = mapRef.current;
@@ -668,9 +839,50 @@ export default function MapContainer() {
   };
 
   const toggleFuelCode = (code: string) => {
-    setSelectedFuelCodes((prev) =>
-      prev.includes(code) ? prev.filter((x) => x !== code) : [...prev, code]
-    );
+    setSelectedFuelCodes((prev) => {
+      const isSelected = prev.includes(code);
+
+      if (isSelected) {
+        setFuelPriceRange((ranges) => {
+          const next = { ...ranges };
+          delete next[code];
+          return next;
+        });
+        return prev.filter((x) => x !== code);
+      }
+
+      setFuelPriceRange((ranges) => ({
+        ...ranges,
+        [code]: getFuelPriceRange(ranges, code),
+      }));
+      return [...prev, code];
+    });
+  };
+
+  const updateFuelMinPrice = (code: string, value: number) => {
+    setFuelPriceRange((prev) => {
+      const current = getFuelPriceRange(prev, code);
+      return {
+        ...prev,
+        [code]: {
+          min: Math.min(value, current.max),
+          max: current.max,
+        },
+      };
+    });
+  };
+
+  const updateFuelMaxPrice = (code: string, value: number) => {
+    setFuelPriceRange((prev) => {
+      const current = getFuelPriceRange(prev, code);
+      return {
+        ...prev,
+        [code]: {
+          min: current.min,
+          max: Math.max(value, current.min),
+        },
+      };
+    });
   };
 
   const toggleStationGroup = (group: string) => {
@@ -684,6 +896,7 @@ export default function MapContainer() {
     setSelectedStationGroups([]);
     setFuelSearch("");
     setStationGroupSearch("");
+    setFuelPriceRange({});
     setRadiusKm(5);
   };
 
@@ -738,16 +951,62 @@ export default function MapContainer() {
           />
 
           <div className="d-flex flex-column gap-2 mt-2">
-            {filteredFuelCodes.map((code) => (
-              <label key={code} className="d-flex align-items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={selectedFuelCodes.includes(code)}
-                  onChange={() => toggleFuelCode(code)}
-                />
-                <span>{FUEL_LABELS[code] || code}</span>
-              </label>
-            ))}
+            {filteredFuelCodes.map((code) => {
+              const checked = selectedFuelCodes.includes(code);
+              const priceRange = getFuelPriceRange(fuelPriceRange, code);
+
+              return (
+                <div
+                  key={code}
+                  className="border rounded-3 px-2 py-2"
+                  style={{ background: checked ? "#f8fbff" : "#fff" }}
+                >
+                  <label className="d-flex align-items-center gap-2 mb-0">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleFuelCode(code)}
+                    />
+                    <span className="fw-semibold">{FUEL_LABELS[code] || code}</span>
+                  </label>
+
+                  {checked && (
+                    <div className="mt-2 ps-4">
+                      <div className="d-flex justify-content-between small text-muted mb-1">
+                        <span>от {priceRange.min} ₸</span>
+                        <span>до {priceRange.max} ₸</span>
+                      </div>
+
+                      <label className="form-label small mb-1">Минимальная цена</label>
+                      <input
+                        type="range"
+                        min={DEFAULT_FUEL_PRICE_MIN}
+                        max={DEFAULT_FUEL_PRICE_MAX}
+                        step={FUEL_PRICE_STEP}
+                        value={priceRange.min}
+                        onChange={(e) =>
+                          updateFuelMinPrice(code, Number(e.target.value))
+                        }
+                        className="form-range mb-2"
+                      />
+
+                      <label className="form-label small mb-1">Максимальная цена</label>
+                      <input
+                        type="range"
+                        min={DEFAULT_FUEL_PRICE_MIN}
+                        max={DEFAULT_FUEL_PRICE_MAX}
+                        step={FUEL_PRICE_STEP}
+                        value={priceRange.max}
+                        onChange={(e) =>
+                          updateFuelMaxPrice(code, Number(e.target.value))
+                        }
+                        className="form-range"
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {filteredFuelCodes.length === 0 && (
               <div className="text-muted small">Ничего не найдено</div>

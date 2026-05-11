@@ -52,23 +52,32 @@ class StationService:
         )
         return assignment is not None
 
-    def _get_station_fuel_codes_map(self, station_ids: list[int]) -> dict[int, list[str]]:
+    def _get_station_fuels_map(self, station_ids: list[int]) -> dict[int, list[dict]]:
         if not station_ids:
             return {}
 
         rows = (
-            self.db.query(StationFuel.station_id, FuelType.code)
+            self.db.query(StationFuel, FuelType)
             .join(FuelType, FuelType.id == StationFuel.fuel_type_id)
             .filter(
                 StationFuel.station_id.in_(station_ids),
                 StationFuel.is_available.is_(True),
             )
+            .order_by(FuelType.sort_order.asc(), FuelType.id.asc())
             .all()
         )
 
-        result: dict[int, list[str]] = {}
-        for station_id, fuel_code in rows:
-            result.setdefault(station_id, []).append(fuel_code)
+        result: dict[int, list[dict]] = {}
+        for station_fuel, fuel_type in rows:
+            result.setdefault(station_fuel.station_id, []).append(
+                {
+                    "fuel_type_id": fuel_type.id,
+                    "code": fuel_type.code,
+                    "name": fuel_type.name,
+                    "is_available": station_fuel.is_available,
+                    "price": station_fuel.price,
+                }
+            )
 
         return result
 
@@ -91,10 +100,11 @@ class StationService:
 
         rows = query.order_by(Station.id.desc()).all()
         station_ids = [station.id for station, _ in rows]
-        fuel_codes_map = self._get_station_fuel_codes_map(station_ids)
+        fuels_map = self._get_station_fuels_map(station_ids)
 
         result = []
         for station, details in rows:
+            station_fuels = fuels_map.get(station.id, [])
             result.append(
                 {
                     "id": station.id,
@@ -109,7 +119,8 @@ class StationService:
                     "working_hours": details.working_hours if details else None,
                     "columns_count": details.columns_count if details else None,
                     "main_photo_url": details.main_photo_url if details else None,
-                    "fuel_codes": fuel_codes_map.get(station.id, []),
+                    "fuel_codes": [fuel["code"] for fuel in station_fuels],
+                    "fuels": station_fuels,
                 }
             )
         return result
@@ -139,10 +150,11 @@ class StationService:
 
         rows = query.order_by(Station.id.desc()).all()
         station_ids = [station.id for station, _ in rows]
-        fuel_codes_map = self._get_station_fuel_codes_map(station_ids)
+        fuels_map = self._get_station_fuels_map(station_ids)
 
         result = []
         for station, details in rows:
+            station_fuels = fuels_map.get(station.id, [])
             result.append(
                 {
                     "id": station.id,
@@ -157,7 +169,8 @@ class StationService:
                     "working_hours": details.working_hours if details else None,
                     "columns_count": details.columns_count if details else None,
                     "main_photo_url": details.main_photo_url if details else None,
-                    "fuel_codes": fuel_codes_map.get(station.id, []),
+                    "fuel_codes": [fuel["code"] for fuel in station_fuels],
+                    "fuels": station_fuels,
                 }
             )
         return result

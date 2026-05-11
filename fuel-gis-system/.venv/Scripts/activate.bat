@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\MyProgJS\GisMap_web_application\fuel-gis-system\.venv
+set VIRTUAL_ENV=C:\dz\Diploma_Project_AITU\GisMap_web_application\fuel-gis-system\.venv
 
 if not defined PROMPT set PROMPT=$P$G
 
