@@ -9,6 +9,7 @@ import { getToken, removeToken } from "@/lib/auth/token";
 function getPageTitle(pathname: string) {
   if (pathname === "/admin") return "Dashboard";
   if (pathname === "/admin/stations") return "Управление АЗС";
+  if (pathname === "/admin/expansion") return "Расширение сети";
   if (pathname === "/admin/users") return "Пользователи";
   if (pathname === "/admin/audit") return "Аудит";
   if (pathname === "/admin/presets") return "Пресеты";

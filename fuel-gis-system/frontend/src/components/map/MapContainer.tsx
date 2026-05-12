@@ -32,12 +32,21 @@ type ScreenBox = {
   bottom: number;
 };
 
+type PlannedStation = {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  createdAt: string;
+};
+
 const DEFAULT_FUEL_PRICE_MIN = 200;
 const DEFAULT_FUEL_PRICE_MAX = 400;
 const FUEL_PRICE_STEP = 5;
 const STATION_LABEL_MIN_ZOOM = 13;
 const OSM_RASTER_MAX_ZOOM = 19;
 const MAP_MAX_ZOOM = 19;
+const PLANNED_STORAGE_KEY = "fuel-gis-planned-stations";
 
 const FUEL_LABELS: Record<string, string> = {
   AI_80: "АИ-80",
@@ -155,6 +164,20 @@ function createCircleGeoJSON(
   };
 }
 
+
+function loadPlannedStations(): PlannedStation[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(PLANNED_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PlannedStation[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function buildFuelHtml(data: StationFull) {
   if (!data.fuels || data.fuels.length === 0) {
     return `<div style="margin-top:10px;color:#6b7280;">Данные по топливу не добавлены</div>`;
@@ -247,8 +270,10 @@ export default function MapContainer() {
   const stationLabelRafRef = useRef<number | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const routePopupRef = useRef<maplibregl.Popup | null>(null);
+  const plannedMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   const [stations, setStations] = useState<StationListItem[]>([]);
+  const [plannedStations, setPlannedStations] = useState<PlannedStation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -376,6 +401,19 @@ export default function MapContainer() {
 
   useEffect(() => {
     requestUserLocation();
+  }, []);
+
+  useEffect(() => {
+    const syncPlannedStations = () => setPlannedStations(loadPlannedStations());
+    syncPlannedStations();
+
+    window.addEventListener("storage", syncPlannedStations);
+    window.addEventListener("fuel-gis-planned-stations-updated", syncPlannedStations);
+
+    return () => {
+      window.removeEventListener("storage", syncPlannedStations);
+      window.removeEventListener("fuel-gis-planned-stations-updated", syncPlannedStations);
+    };
   }, []);
 
   const availableFuelCodes = useMemo(() => {
@@ -569,6 +607,8 @@ export default function MapContainer() {
       userMarkerRef.current = null;
       routePopupRef.current?.remove();
       routePopupRef.current = null;
+      plannedMarkersRef.current.forEach((marker) => marker.remove());
+      plannedMarkersRef.current = [];
       map.remove();
       mapRef.current = null;
     };
@@ -631,6 +671,35 @@ export default function MapContainer() {
       source.setData(circleData as never);
     }
   }, [userLocation, radiusKm]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    plannedMarkersRef.current.forEach((marker) => marker.remove());
+    plannedMarkersRef.current = [];
+
+    plannedStations.forEach((station) => {
+      const markerElement = document.createElement("div");
+      markerElement.className = "planned-station-marker";
+      markerElement.innerHTML = "<span>⛽</span>";
+
+      const marker = new maplibregl.Marker({ element: markerElement })
+        .setLngLat([station.lon, station.lat])
+        .setPopup(
+          new maplibregl.Popup({ offset: 20 }).setHTML(`
+            <div style="font-family:Arial,sans-serif;min-width:210px;">
+              <div style="font-weight:800;margin-bottom:6px;">${station.name}</div>
+              <div style="color:#16a34a;font-weight:700;">Скоро появится</div>
+              <div style="font-size:12px;color:#64748b;margin-top:6px;">${station.lat}, ${station.lon}</div>
+            </div>
+          `)
+        )
+        .addTo(map);
+
+      plannedMarkersRef.current.push(marker);
+    });
+  }, [plannedStations]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1047,6 +1116,12 @@ export default function MapContainer() {
         <div className="text-muted small">
           Найдено станций: {filteredStations.length}
         </div>
+
+        {plannedStations.length > 0 && (
+          <div className="mt-2 small" style={{ color: "#16a34a", fontWeight: 700 }}>
+            Будущие АЗС на карте: {plannedStations.length}
+          </div>
+        )}
       </div>
 
       {selectedStation && (

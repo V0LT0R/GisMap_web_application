@@ -8,6 +8,7 @@ const links = [
   { href: "/", label: "Назад на карту" },
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/stations", label: "Станции" },
+  { href: "/admin/expansion", label: "Расширение сети" },
   { href: "/admin/users", label: "Пользователи" },
   { href: "/admin/audit", label: "Аудит" },
   { href: "/admin/presets", label: "Пресеты" },
