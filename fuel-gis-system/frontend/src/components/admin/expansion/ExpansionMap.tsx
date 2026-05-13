@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
+import { createClientAuditLog } from "@/lib/api/admin";
 import { getMyStations } from "@/lib/api/stations";
 import { getCurrentSessionUser } from "@/lib/auth/session";
 import { getToken } from "@/lib/auth/token";
@@ -306,6 +307,38 @@ function filterVisiblePlannedStations(items: PlannedStation[], user: UserMe | nu
 function saveAllPlannedStations(items: PlannedStation[]) {
   window.localStorage.setItem(PLANNED_STORAGE_KEY, JSON.stringify(items));
   window.dispatchEvent(new Event("fuel-gis-planned-stations-updated"));
+}
+
+
+function logPlannedStationAudit(
+  item: PlannedStation,
+  source: "manual_map_click" | "recommended_zone",
+  zone?: ZoneRecommendation
+) {
+  const token = getToken();
+  if (!token) return;
+
+  createClientAuditLog(token, {
+    action: "planned_station_create",
+    entity_type: "planned_station",
+    entity_id: item.id,
+    description: `Добавлена будущая АЗС: ${item.name}`,
+    meta: {
+      planned_station_id: item.id,
+      name: item.name,
+      latitude: item.lat,
+      longitude: item.lon,
+      source,
+      owner_id: item.ownerId ?? null,
+      owner_email: item.ownerEmail ?? null,
+      zone_id: zone?.id ?? null,
+      zone_name: zone?.name ?? null,
+      zone_score: zone?.score ?? null,
+      zone_priority: zone?.priority ?? null,
+    },
+  }).catch((err) => {
+    console.warn("Planned station audit log error:", err);
+  });
 }
 
 function buildScore(zone: DemandZone, stations: StationListItem[]): ZoneRecommendation {
@@ -624,6 +657,7 @@ export default function ExpansionMap() {
       const nextAll = [...allItems, newItem];
       saveAllPlannedStations(nextAll);
       setPlannedStations(filterVisiblePlannedStations(nextAll, currentUser));
+      logPlannedStationAudit(newItem, "manual_map_click");
 
       setIsPickMode(false);
     });
@@ -790,6 +824,7 @@ export default function ExpansionMap() {
     const nextAll = [...allItems, newItem];
     saveAllPlannedStations(nextAll);
     setPlannedStations(filterVisiblePlannedStations(nextAll, currentUser));
+    logPlannedStationAudit(newItem, "recommended_zone", zone);
   };
 
   const removePlannedStation = (id: string) => {

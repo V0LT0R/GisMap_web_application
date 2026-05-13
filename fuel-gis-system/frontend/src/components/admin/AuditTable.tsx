@@ -11,6 +11,7 @@ const ACTION_LABELS: Record<string, string> = {
   admin_station_assign: "Назначение АЗС",
   admin_station_replace: "Обновление назначений",
   admin_user_create: "Создание admin",
+  planned_station_create: "Добавление будущей АЗС",
 };
 
 function formatDate(value: string) {
@@ -68,7 +69,7 @@ export default function AuditTable() {
         <div>
           <h2 className="admin-card-title mb-1">Журнал действий</h2>
           <div className="admin-muted">
-            Здесь super admin видит изменения деталей АЗС, цен, топлива, пользователей и назначений.
+            Здесь super admin видит изменения деталей АЗС, цен, топлива, пользователей, назначений и добавление будущих АЗС.
           </div>
         </div>
         <div className="audit-total">Всего записей: {total}</div>

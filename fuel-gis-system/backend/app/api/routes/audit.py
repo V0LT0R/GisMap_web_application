@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_super_admin
+from app.api.deps import require_admin_or_super_admin, require_super_admin
 from app.core.database import get_db
 from app.models.user import User
-from app.schemas.audit import AuditLogListResponse
+from app.schemas.audit import AuditClientActionIn, AuditLogListResponse, AuditLogOut
 from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/api/admin/audit", tags=["audit"])
@@ -21,3 +21,21 @@ def list_audit_logs(
 ):
     service = AuditService(db)
     return service.list_logs(search=search, action=action, limit=limit, offset=offset)
+
+
+@router.post("/client-action", response_model=AuditLogOut)
+def create_client_audit_log(
+    payload: AuditClientActionIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin_or_super_admin),
+):
+    service = AuditService(db)
+    return service.log(
+        user=current_user,
+        action=payload.action,
+        entity_type=payload.entity_type,
+        entity_id=payload.entity_id,
+        description=payload.description,
+        meta=payload.meta,
+        commit=True,
+    )

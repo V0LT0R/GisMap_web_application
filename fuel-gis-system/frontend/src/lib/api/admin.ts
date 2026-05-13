@@ -100,6 +100,34 @@ export async function getAllStationsForAdmin(token: string): Promise<StationList
   return res.json();
 }
 
+
+export async function createClientAuditLog(
+  token: string,
+  payload: {
+    action: string;
+    entity_type?: string;
+    entity_id?: string;
+    description?: string;
+    meta?: Record<string, unknown>;
+  }
+) {
+  const res = await fetch(`${API_URL}/api/admin/audit/client-action`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const data = await safeJson(res);
+    throw new Error(data?.detail || "Не удалось записать действие в аудит");
+  }
+
+  return res.json();
+}
+
 export async function getAuditLogs(
   token: string,
   params: { search?: string; action?: string; limit?: number; offset?: number } = {}

@@ -22,3 +22,11 @@ class AuditLogListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class AuditClientActionIn(BaseModel):
+    action: str
+    entity_type: str | None = None
+    entity_id: str | None = None
+    description: str | None = None
+    meta: dict | None = None

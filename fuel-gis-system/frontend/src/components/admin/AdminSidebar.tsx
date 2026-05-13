@@ -14,7 +14,6 @@ const links: Array<{ href: string; label: string; roles?: UserMe["role"][] }> = 
   { href: "/admin/expansion", label: "Расширение сети" },
   { href: "/admin/users", label: "Пользователи", roles: ["super_admin"] },
   { href: "/admin/audit", label: "Аудит", roles: ["super_admin"] },
-  { href: "/admin/presets", label: "Пресеты" },
 ];
 
 export default function AdminSidebar() {

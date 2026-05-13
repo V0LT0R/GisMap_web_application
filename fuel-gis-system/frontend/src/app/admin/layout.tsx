@@ -12,7 +12,6 @@ function getPageTitle(pathname: string) {
   if (pathname === "/admin/expansion") return "Расширение сети";
   if (pathname === "/admin/users") return "Пользователи";
   if (pathname === "/admin/audit") return "Аудит";
-  if (pathname === "/admin/presets") return "Пресеты";
   if (pathname === "/admin/login") return "Вход";
   if (pathname === "/admin/register") return "Регистрация admin";
   if (pathname === "/admin/verify") return "Подтверждение email";
@@ -56,6 +55,11 @@ export default function AdminLayout({
 
         if ((pathname === "/admin/users" || pathname === "/admin/audit") && user.role !== "super_admin") {
           router.replace("/admin/stations");
+          return;
+        }
+
+        if (pathname === "/admin/presets") {
+          router.replace("/admin");
           return;
         }
 
