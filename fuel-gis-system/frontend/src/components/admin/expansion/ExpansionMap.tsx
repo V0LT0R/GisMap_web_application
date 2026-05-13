@@ -744,7 +744,7 @@ export default function ExpansionMap() {
     plannedStations.forEach((station) => {
       const markerElement = document.createElement("div");
       markerElement.className = "planned-station-marker";
-      markerElement.innerHTML = "<span>⛽</span>";
+      markerElement.innerHTML = `<span>⛽</span><strong>${station.name}</strong>`;
 
       const marker = new maplibregl.Marker({ element: markerElement })
         .setLngLat([station.lon, station.lat])
@@ -778,7 +778,7 @@ export default function ExpansionMap() {
     const currentUser = userRef.current;
     const newItem: PlannedStation = {
       id: `planned-${Date.now()}`,
-      name: `Новая АЗС: ${zone.name}`,
+      name: manualNameRef.current.trim() || `Новая АЗС: ${zone.name}`,
       lat: zone.lat,
       lon: zone.lon,
       createdAt: new Date().toISOString(),
@@ -823,7 +823,7 @@ export default function ExpansionMap() {
 
         <div className="expansion-actions">
           <button className="btn btn-primary" onClick={addBestZoneAsPlanned} disabled={!selectedZone}>
-            Добавить выбранную зону как «Скоро появится»
+            Добавить выбранную зону
           </button>
 
           <button
@@ -874,12 +874,12 @@ export default function ExpansionMap() {
           </div>
 
           <div className="expansion-panel-section">
-            <label className="form-label">Название ручной точки</label>
+            <label className="form-label">Название будущей АЗС</label>
             <input
               className="form-control"
               value={manualName}
               onChange={(event) => setManualName(event.target.value)}
-              placeholder="Например: АЗС возле нового ЖК"
+              placeholder="Например: Qazaq Oil EXPO или АЗС возле нового ЖК"
             />
           </div>
 

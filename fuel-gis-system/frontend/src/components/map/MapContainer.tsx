@@ -169,16 +169,14 @@ function createCircleGeoJSON(
 }
 
 
-function loadPlannedStations(user: UserMe | null): PlannedStation[] {
-  if (typeof window === "undefined" || !user) return [];
+function loadPlannedStations(): PlannedStation[] {
+  if (typeof window === "undefined") return [];
 
   try {
     const raw = window.localStorage.getItem(PLANNED_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as PlannedStation[];
-    if (!Array.isArray(parsed)) return [];
-    if (user.role === "super_admin") return parsed;
-    return parsed.filter((item) => item.ownerId === user.id || (!item.ownerId && item.ownerEmail === user.email));
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -413,12 +411,12 @@ export default function MapContainer() {
   useEffect(() => {
     getCurrentSessionUser().then((user) => {
       setSessionUser(user);
-      setPlannedStations(loadPlannedStations(user));
     });
+    setPlannedStations(loadPlannedStations());
   }, []);
 
   useEffect(() => {
-    const syncPlannedStations = () => setPlannedStations(loadPlannedStations(sessionUser));
+    const syncPlannedStations = () => setPlannedStations(loadPlannedStations());
     syncPlannedStations();
 
     window.addEventListener("storage", syncPlannedStations);
@@ -428,7 +426,7 @@ export default function MapContainer() {
       window.removeEventListener("storage", syncPlannedStations);
       window.removeEventListener("fuel-gis-planned-stations-updated", syncPlannedStations);
     };
-  }, [sessionUser]);
+  }, []);
 
   const availableFuelCodes = useMemo(() => {
     const set = new Set<string>();
@@ -696,7 +694,7 @@ export default function MapContainer() {
     plannedStations.forEach((station) => {
       const markerElement = document.createElement("div");
       markerElement.className = "planned-station-marker";
-      markerElement.innerHTML = "<span>⛽</span>";
+      markerElement.innerHTML = `<span>⛽</span><strong>${station.name}</strong>`;
 
       const marker = new maplibregl.Marker({ element: markerElement })
         .setLngLat([station.lon, station.lat])

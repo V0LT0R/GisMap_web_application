@@ -588,6 +588,7 @@ a {
 .expansion-zone-marker.low { background: #64748b; }
 
 .planned-station-marker {
+  position: relative;
   width: 42px;
   height: 42px;
   border-radius: 50% 50% 50% 14px;
@@ -604,6 +605,28 @@ a {
 .planned-station-marker span {
   transform: rotate(45deg);
   font-size: 18px;
+}
+
+.planned-station-marker strong {
+  position: absolute;
+  left: 34px;
+  top: -2px;
+  transform: rotate(45deg);
+  min-width: 118px;
+  max-width: 190px;
+  padding: 5px 9px;
+  border: 1px solid rgba(124, 58, 237, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #4c1d95;
+  font-size: 12px;
+  line-height: 1.15;
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+  pointer-events: none;
 }
 
 .selected-zone-box h4 {
