@@ -10,6 +10,7 @@ from app.models.station_admin import StationAdmin
 from app.models.fuel_type import FuelType
 from app.models.station_fuel import StationFuel
 from app.utils.enums import UserRole
+from app.services.audit_service import AuditService
 
 
 class StationService:
@@ -257,6 +258,19 @@ class StationService:
         details.main_photo_url = payload.main_photo_url
         details.updated_by = current_user.id
 
+        AuditService(self.db).log(
+            user=current_user,
+            action="station_details_update",
+            entity_type="station",
+            entity_id=station_id,
+            description=f"Обновлены детали АЗС #{station_id}",
+            meta={
+                "is_operational": payload.is_operational,
+                "working_hours": payload.working_hours,
+                "columns_count": payload.columns_count,
+                "main_photo_url": payload.main_photo_url,
+            },
+        )
         self.db.commit()
         self.db.refresh(details)
 
@@ -303,6 +317,17 @@ class StationService:
             row.price = item.price if item.is_available else None
             row.updated_by = current_user.id
 
+        AuditService(self.db).log(
+            user=current_user,
+            action="station_fuels_update",
+            entity_type="station",
+            entity_id=station_id,
+            description=f"Обновлены топливо и цены для АЗС #{station_id}",
+            meta={
+                "items_count": len(items),
+                "fuel_type_ids": [item.fuel_type_id for item in items],
+            },
+        )
         self.db.commit()
         return {"message": "Топливо и цены обновлены"}
 
@@ -346,6 +371,14 @@ class StationService:
             self.db.add(assignment)
             added_count += 1
 
+        AuditService(self.db).log(
+            user=current_user,
+            action="admin_station_assign",
+            entity_type="admin_user",
+            entity_id=admin_user_id,
+            description=f"Назначены АЗС admin пользователю #{admin_user_id}",
+            meta={"station_ids": unique_station_ids, "added_count": added_count},
+        )
         self.db.commit()
         return {"message": f"Назначение завершено. Добавлено связей: {added_count}"}
 

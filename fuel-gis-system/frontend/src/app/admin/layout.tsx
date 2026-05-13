@@ -54,7 +54,7 @@ export default function AdminLayout({
           return;
         }
 
-        if (pathname === "/admin/users" && user.role !== "super_admin") {
+        if ((pathname === "/admin/users" || pathname === "/admin/audit") && user.role !== "super_admin") {
           router.replace("/admin/stations");
           return;
         }

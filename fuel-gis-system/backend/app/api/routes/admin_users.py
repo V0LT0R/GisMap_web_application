@@ -10,6 +10,7 @@ from app.models.user import User
 from app.schemas.auth import MessageResponse
 from app.schemas.user import AdminUserCreateRequest, AdminUserOut, ReplaceAdminStationsRequest
 from app.utils.enums import UserRole
+from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/api/admin/users", tags=["admin-users"])
 
@@ -96,6 +97,15 @@ def create_admin_user(
         is_email_verified=payload.is_email_verified,
     )
     db.add(user)
+    db.flush()
+    AuditService(db).log(
+        user=current_user,
+        action="admin_user_create",
+        entity_type="user",
+        entity_id=user.id,
+        description=f"Создан admin пользователь {user.email}",
+        meta={"email": user.email, "is_active": user.is_active},
+    )
     db.commit()
     db.refresh(user)
 
@@ -150,5 +160,13 @@ def replace_admin_stations(
             )
         )
 
+    AuditService(db).log(
+        user=current_user,
+        action="admin_station_replace",
+        entity_type="admin_user",
+        entity_id=admin_user_id,
+        description=f"Список АЗС пользователя {admin_user.email} обновлен",
+        meta={"station_ids": station_ids, "assigned_count": len(station_ids)},
+    )
     db.commit()
     return {"message": f"Список АЗС обновлен. Назначено: {len(station_ids)}"}

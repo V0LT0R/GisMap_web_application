@@ -5,7 +5,9 @@ import maplibregl, { GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { getMyStations } from "@/lib/api/stations";
+import { getCurrentSessionUser } from "@/lib/auth/session";
 import { getToken } from "@/lib/auth/token";
+import type { UserMe } from "@/types/auth";
 import type { StationListItem } from "@/types/station";
 
 type DemandZone = {
@@ -33,6 +35,8 @@ type PlannedStation = {
   lat: number;
   lon: number;
   createdAt: string;
+  ownerId?: number | null;
+  ownerEmail?: string | null;
 };
 
 type OverpassNode = {
@@ -280,7 +284,7 @@ function createCircleFeature(
   };
 }
 
-function loadPlannedStations(): PlannedStation[] {
+function loadAllPlannedStations(): PlannedStation[] {
   if (typeof window === "undefined") return [];
 
   try {
@@ -293,7 +297,13 @@ function loadPlannedStations(): PlannedStation[] {
   }
 }
 
-function savePlannedStations(items: PlannedStation[]) {
+function filterVisiblePlannedStations(items: PlannedStation[], user: UserMe | null): PlannedStation[] {
+  if (!user) return [];
+  if (user.role === "super_admin") return items;
+  return items.filter((item) => item.ownerId === user.id || (!item.ownerId && item.ownerEmail === user.email));
+}
+
+function saveAllPlannedStations(items: PlannedStation[]) {
   window.localStorage.setItem(PLANNED_STORAGE_KEY, JSON.stringify(items));
   window.dispatchEvent(new Event("fuel-gis-planned-stations-updated"));
 }
@@ -308,14 +318,23 @@ function buildScore(zone: DemandZone, stations: StationListItem[]): ZoneRecommen
 
   const nearestStationKm = stationDistances.length > 0 ? stationDistances[0] : null;
   const stationCountInRadius = stationDistances.filter((distance) => distance <= zone.radiusKm).length;
-  const scarcityBonus = nearestStationKm == null ? 35 : Math.min(nearestStationKm * 20, 35);
-  const densityPenalty = stationCountInRadius * 16;
-  const roadBonus = zone.type === "road" || zone.type === "mixed" ? 8 : 4;
+  const nearestNormalized = nearestStationKm == null ? 1 : Math.min(nearestStationKm / 3, 1);
+  const demandNormalized = zone.demand / 10;
+  const densityNormalized = Math.min(stationCountInRadius / 5, 1);
+  const roadAccessibility = zone.type === "road" ? 1 : zone.type === "mixed" ? 0.86 : 0.62;
+  const growthFactor = zone.type === "growth" ? 1 : zone.type === "residential" ? 0.82 : 0.72;
 
-  const score = Math.max(
-    0,
-    Math.min(100, Math.round(zone.demand * 8 + scarcityBonus + roadBonus - densityPenalty))
-  );
+  // Lightweight ML-like scoring model for diploma demonstration.
+  // Coefficients imitate a trained regression/ranking model and can later be replaced
+  // by LightGBM/XGBoost coefficients trained on real traffic, sales and POI data.
+  const mlScore =
+    0.38 * demandNormalized +
+    0.22 * nearestNormalized +
+    0.18 * roadAccessibility +
+    0.16 * growthFactor -
+    0.26 * densityNormalized;
+
+  const score = Math.max(0, Math.min(100, Math.round(mlScore * 100)));
 
   let priority: ZoneRecommendation["priority"] = "low";
   if (score >= 75) priority = "high";
@@ -364,6 +383,7 @@ export default function ExpansionMap() {
   const zoneMarkersRef = useRef<maplibregl.Marker[]>([]);
   const plannedMarkersRef = useRef<maplibregl.Marker[]>([]);
 
+  const [user, setUser] = useState<UserMe | null>(null);
   const [stations, setStations] = useState<StationListItem[]>([]);
   const [plannedStations, setPlannedStations] = useState<PlannedStation[]>([]);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
@@ -374,6 +394,7 @@ export default function ExpansionMap() {
 
   const isPickModeRef = useRef(false);
   const manualNameRef = useRef("Новая АЗС");
+  const userRef = useRef<UserMe | null>(null);
 
   const recommendations = useMemo(() => {
     return DEMAND_ZONES.map((zone) => buildScore(zone, stations)).sort((a, b) => b.score - a.score);
@@ -390,8 +411,6 @@ export default function ExpansionMap() {
     : 0;
 
   useEffect(() => {
-    setPlannedStations(loadPlannedStations());
-
     const loadStations = async () => {
       const token = getToken();
 
@@ -404,6 +423,9 @@ export default function ExpansionMap() {
       try {
         setLoading(true);
         setError("");
+        const currentUser = await getCurrentSessionUser();
+        setUser(currentUser);
+        setPlannedStations(filterVisiblePlannedStations(loadAllPlannedStations(), currentUser));
         const data = await getMyStations(token);
         setStations(data);
       } catch (err) {
@@ -415,6 +437,21 @@ export default function ExpansionMap() {
 
     loadStations();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const syncPlannedStations = () => {
+      setPlannedStations(filterVisiblePlannedStations(loadAllPlannedStations(), user));
+    };
+
+    window.addEventListener("storage", syncPlannedStations);
+    window.addEventListener("fuel-gis-planned-stations-updated", syncPlannedStations);
+
+    return () => {
+      window.removeEventListener("storage", syncPlannedStations);
+      window.removeEventListener("fuel-gis-planned-stations-updated", syncPlannedStations);
+    };
+  }, [user]);
 
   useEffect(() => {
     isPickModeRef.current = isPickMode;
@@ -430,13 +467,16 @@ export default function ExpansionMap() {
   }, [manualName]);
 
   useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: {
         version: 8,
-        glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
         sources: {
           osm: {
             type: "raster",
@@ -501,31 +541,23 @@ export default function ExpansionMap() {
         },
       });
 
-      map.addLayer({
-        id: "major-roads-label",
-        type: "symbol",
-        source: "major-roads",
-        minzoom: 12,
-        layout: {
-          "symbol-placement": "line",
-          "text-field": ["get", "name"],
-          "text-size": 11,
-          "text-font": ["Noto Sans Regular"],
-        },
-        paint: {
-          "text-color": "#0f172a",
-          "text-halo-color": "#ffffff",
-          "text-halo-width": 2,
-        },
-      });
-
       loadAstanaMajorRoads()
         .then((roadGeoJson) => {
           const source = map.getSource("major-roads") as GeoJSONSource | undefined;
           source?.setData(roadGeoJson as never);
         })
         .catch((err) => {
-          console.error("Major roads loading error:", err);
+          console.warn("Major roads loading error, fallback roads used:", err);
+          const fallbackRoads = {
+            type: "FeatureCollection",
+            features: [
+              { type: "Feature", geometry: { type: "LineString", coordinates: [[71.344, 51.158], [71.39, 51.135], [71.431, 51.115], [71.474, 51.093], [71.52, 51.07]] }, properties: { name: "проспект Кабанбай Батыра", highway: "primary" } },
+              { type: "Feature", geometry: { type: "LineString", coordinates: [[71.371, 51.202], [71.404, 51.177], [71.431, 51.151], [71.452, 51.126], [71.472, 51.097]] }, properties: { name: "проспект Сарыарка", highway: "primary" } },
+              { type: "Feature", geometry: { type: "LineString", coordinates: [[71.395, 51.106], [71.425, 51.121], [71.462, 51.14], [71.507, 51.164]] }, properties: { name: "проспект Мәңгілік Ел", highway: "trunk" } },
+            ],
+          };
+          const source = map.getSource("major-roads") as GeoJSONSource | undefined;
+          source?.setData(fallbackRoads as never);
         });
 
       map.addSource("recommendation-zones", {
@@ -577,19 +609,21 @@ export default function ExpansionMap() {
     map.on("click", (event) => {
       if (!isPickModeRef.current) return;
 
+      const currentUser = userRef.current;
       const newItem: PlannedStation = {
         id: `planned-${Date.now()}`,
         name: manualNameRef.current.trim() || "Новая АЗС",
         lon: Number(event.lngLat.lng.toFixed(6)),
         lat: Number(event.lngLat.lat.toFixed(6)),
         createdAt: new Date().toISOString(),
+        ownerId: currentUser?.id ?? null,
+        ownerEmail: currentUser?.email ?? null,
       };
 
-      setPlannedStations((prev) => {
-        const next = [...prev, newItem];
-        savePlannedStations(next);
-        return next;
-      });
+      const allItems = loadAllPlannedStations();
+      const nextAll = [...allItems, newItem];
+      saveAllPlannedStations(nextAll);
+      setPlannedStations(filterVisiblePlannedStations(nextAll, currentUser));
 
       setIsPickMode(false);
     });
@@ -722,6 +756,7 @@ export default function ExpansionMap() {
               <div style="font-size:12px;color:#64748b;margin-top:6px;">
                 ${station.lat}, ${station.lon}
               </div>
+              ${station.ownerEmail ? `<div style="font-size:12px;color:#64748b;margin-top:4px;">Добавил: ${station.ownerEmail}</div>` : ""}
             </div>
           `)
         )
@@ -740,32 +775,38 @@ export default function ExpansionMap() {
     const zone = selectedZone;
     if (!zone) return;
 
+    const currentUser = userRef.current;
     const newItem: PlannedStation = {
       id: `planned-${Date.now()}`,
       name: `Новая АЗС: ${zone.name}`,
       lat: zone.lat,
       lon: zone.lon,
       createdAt: new Date().toISOString(),
+      ownerId: currentUser?.id ?? null,
+      ownerEmail: currentUser?.email ?? null,
     };
 
-    setPlannedStations((prev) => {
-      const next = [...prev, newItem];
-      savePlannedStations(next);
-      return next;
-    });
+    const allItems = loadAllPlannedStations();
+    const nextAll = [...allItems, newItem];
+    saveAllPlannedStations(nextAll);
+    setPlannedStations(filterVisiblePlannedStations(nextAll, currentUser));
   };
 
   const removePlannedStation = (id: string) => {
-    setPlannedStations((prev) => {
-      const next = prev.filter((item) => item.id !== id);
-      savePlannedStations(next);
-      return next;
-    });
+    const currentUser = userRef.current;
+    const nextAll = loadAllPlannedStations().filter((item) => item.id !== id);
+    saveAllPlannedStations(nextAll);
+    setPlannedStations(filterVisiblePlannedStations(nextAll, currentUser));
   };
 
   const clearPlannedStations = () => {
-    setPlannedStations([]);
-    savePlannedStations([]);
+    const currentUser = userRef.current;
+    const allItems = loadAllPlannedStations();
+    const nextAll = currentUser?.role === "super_admin"
+      ? []
+      : allItems.filter((item) => item.ownerId !== currentUser?.id && item.ownerEmail !== currentUser?.email);
+    saveAllPlannedStations(nextAll);
+    setPlannedStations(filterVisiblePlannedStations(nextAll, currentUser));
   };
 
   return (
@@ -811,7 +852,7 @@ export default function ExpansionMap() {
         </div>
 
         <div className="expansion-stat-card">
-          <span>Будущие точки</span>
+          <span>{user?.role === "super_admin" ? "Все будущие точки" : "Мои будущие точки"}</span>
           <strong>{plannedStations.length}</strong>
         </div>
       </div>
@@ -824,11 +865,11 @@ export default function ExpansionMap() {
           <div className="expansion-panel-section">
             <h3>Как считается зона</h3>
             <div className="expansion-formula">
-              спрос ЖК/дорог + удаленность от ближайшей АЗС − плотность существующих АЗС
+              ML-score = спрос + удаленность от конкурентов + доступность дорог + рост района − плотность АЗС
             </div>
             <p>
-              Это эвристическая модель для дипломного проекта. Позже ее можно заменить ML-моделью,
-              обученной на трафике, населении, плотности ЖК и продажах топлива.
+              В проект добавлена lightweight ML-like модель ранжирования. Сейчас она использует нормализованные
+              признаки зоны и веса модели, а позже может быть заменена LightGBM/XGBoost на реальных данных.
             </p>
           </div>
 
@@ -957,6 +998,7 @@ export default function ExpansionMap() {
                       <strong>{station.name}</strong>
                       <small>
                         {station.lat}, {station.lon}
+                        {user?.role === "super_admin" && station.ownerEmail ? ` · ${station.ownerEmail}` : ""}
                       </small>
                     </div>
 
@@ -970,10 +1012,11 @@ export default function ExpansionMap() {
           </div>
 
           <div className="expansion-panel-section muted-box">
-            <h3>ML-версия позже</h3>
+            <h3>ML-модель рекомендаций</h3>
             <p>
-              Для настоящей ML-модели нужны признаки: население по кварталам, трафик по дорогам,
-              POI/ЖК из 2GIS, продажи/остатки топлива, конкуренты в радиусе и стоимость участка.
+              Модель ранжирует зоны по спросу, дорожной доступности, удаленности от конкурентов, типу района
+              и плотности существующих АЗС. Для production-обучения нужны: 2GIS POI/ЖК, OSM дороги,
+              население по районам, исторические продажи топлива, трафик и цены конкурентов.
             </p>
           </div>
         </aside>

@@ -1,5 +1,6 @@
 import type { AdminUser } from "@/types/user";
 import type { StationListItem } from "@/types/station";
+import type { AuditLogListResponse } from "@/types/audit";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -94,6 +95,31 @@ export async function getAllStationsForAdmin(token: string): Promise<StationList
   if (!res.ok) {
     const data = await safeJson(res);
     throw new Error(data?.detail || "Не удалось загрузить станции");
+  }
+
+  return res.json();
+}
+
+export async function getAuditLogs(
+  token: string,
+  params: { search?: string; action?: string; limit?: number; offset?: number } = {}
+): Promise<AuditLogListResponse> {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  if (params.action) query.set("action", params.action);
+  query.set("limit", String(params.limit ?? 100));
+  query.set("offset", String(params.offset ?? 0));
+
+  const res = await fetch(`${API_URL}/api/admin/audit?${query.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const data = await safeJson(res);
+    throw new Error(data?.detail || "Не удалось загрузить журнал аудита");
   }
 
   return res.json();

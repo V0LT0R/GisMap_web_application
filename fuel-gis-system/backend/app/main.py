@@ -13,6 +13,7 @@ from app.models.station_details import StationDetails
 from app.models.station_admin import StationAdmin
 from app.models.fuel_type import FuelType
 from app.models.station_fuel import StationFuel
+from app.models.audit_log import AuditLog
 
 app = FastAPI(title="Fuel GIS Backend")
 

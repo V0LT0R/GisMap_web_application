@@ -7,6 +7,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import SearchInput from "@/components/common/SearchInput";
 import { getNavigationRoute, getStationPublicById, getStations } from "@/lib/api/stations";
+import { getCurrentSessionUser } from "@/lib/auth/session";
+import type { UserMe } from "@/types/auth";
 import type { StationFull, StationListItem } from "@/types/station";
 
 type UserLocation = {
@@ -38,6 +40,8 @@ type PlannedStation = {
   lat: number;
   lon: number;
   createdAt: string;
+  ownerId?: number | null;
+  ownerEmail?: string | null;
 };
 
 const DEFAULT_FUEL_PRICE_MIN = 200;
@@ -165,14 +169,16 @@ function createCircleGeoJSON(
 }
 
 
-function loadPlannedStations(): PlannedStation[] {
-  if (typeof window === "undefined") return [];
+function loadPlannedStations(user: UserMe | null): PlannedStation[] {
+  if (typeof window === "undefined" || !user) return [];
 
   try {
     const raw = window.localStorage.getItem(PLANNED_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as PlannedStation[];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    if (user.role === "super_admin") return parsed;
+    return parsed.filter((item) => item.ownerId === user.id || (!item.ownerId && item.ownerEmail === user.email));
   } catch {
     return [];
   }
@@ -274,6 +280,7 @@ export default function MapContainer() {
 
   const [stations, setStations] = useState<StationListItem[]>([]);
   const [plannedStations, setPlannedStations] = useState<PlannedStation[]>([]);
+  const [sessionUser, setSessionUser] = useState<UserMe | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -404,7 +411,14 @@ export default function MapContainer() {
   }, []);
 
   useEffect(() => {
-    const syncPlannedStations = () => setPlannedStations(loadPlannedStations());
+    getCurrentSessionUser().then((user) => {
+      setSessionUser(user);
+      setPlannedStations(loadPlannedStations(user));
+    });
+  }, []);
+
+  useEffect(() => {
+    const syncPlannedStations = () => setPlannedStations(loadPlannedStations(sessionUser));
     syncPlannedStations();
 
     window.addEventListener("storage", syncPlannedStations);
@@ -414,7 +428,7 @@ export default function MapContainer() {
       window.removeEventListener("storage", syncPlannedStations);
       window.removeEventListener("fuel-gis-planned-stations-updated", syncPlannedStations);
     };
-  }, []);
+  }, [sessionUser]);
 
   const availableFuelCodes = useMemo(() => {
     const set = new Set<string>();
@@ -692,6 +706,7 @@ export default function MapContainer() {
               <div style="font-weight:800;margin-bottom:6px;">${station.name}</div>
               <div style="color:#16a34a;font-weight:700;">Скоро появится</div>
               <div style="font-size:12px;color:#64748b;margin-top:6px;">${station.lat}, ${station.lon}</div>
+              ${sessionUser?.role === "super_admin" && station.ownerEmail ? `<div style="font-size:12px;color:#64748b;margin-top:4px;">Добавил: ${station.ownerEmail}</div>` : ""}
             </div>
           `)
         )
