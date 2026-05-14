@@ -10,6 +10,7 @@ import { getNavigationRoute, getStationPublicById, getStations } from "@/lib/api
 import { getCurrentSessionUser } from "@/lib/auth/session";
 import type { UserMe } from "@/types/auth";
 import type { StationFull, StationListItem } from "@/types/station";
+import { formatLiters, getStationVisitRecommendation, ML_MODEL_METRICS } from "@/lib/analytics/mlFuelForecast";
 
 type UserLocation = {
   latitude: number;
@@ -219,19 +220,27 @@ function buildFuelHtml(data: StationFull) {
   `;
 }
 
-function buildVisitForecastPlaceholderHtml() {
+function buildVisitForecastHtml(data: StationFull, stationIndex: number, allStations: StationListItem[]) {
+  const recommendation = getStationVisitRecommendation(data, stationIndex, allStations);
+  const color = recommendation.status === "high" ? "#dc2626" : recommendation.status === "medium" ? "#f59e0b" : "#16a34a";
+
   return `
     <div style="margin-top:12px;padding:12px;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff;">
       <div style="font-weight:700;margin-bottom:6px;">Когда лучше посетить АЗС</div>
-      <div style="color:#475569;line-height:1.45;">
-        Заглушка для ML-прогноза. Здесь позже будет показано рекомендуемое время визита с учетом
-        загруженности, очередей и доступности топлива.
+      <div style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#ffffff;border:1px solid #e5e7eb;color:${color};font-weight:800;font-size:12px;margin-bottom:8px;">
+        Загруженность: ${recommendation.loadScore}%
+      </div>
+      <div style="color:#111827;line-height:1.45;margin-bottom:6px;"><b>Лучшее время:</b> ${recommendation.bestTime}</div>
+      <div style="color:#475569;line-height:1.45;margin-bottom:6px;"><b>Лучше избегать:</b> ${recommendation.avoidTime}</div>
+      <div style="color:#475569;line-height:1.45;margin-bottom:6px;">${recommendation.reason}</div>
+      <div style="color:#64748b;font-size:12px;line-height:1.45;">
+        ML-прогноз 24ч: ${formatLiters(recommendation.forecast24hLiters)} · R² ${ML_MODEL_METRICS.R2}
       </div>
     </div>
   `;
 }
 
-function buildPopupHtml(data: StationFull) {
+function buildPopupHtml(data: StationFull, stationIndex: number, allStations: StationListItem[]) {
   return `
     <div style="
       min-width:120px;
@@ -261,7 +270,7 @@ function buildPopupHtml(data: StationFull) {
       </div>
 
       ${buildFuelHtml(data)}
-      ${buildVisitForecastPlaceholderHtml()}
+      ${buildVisitForecastHtml(data, stationIndex, allStations)}
     </div>
   `;
 }
@@ -732,7 +741,8 @@ export default function MapContainer() {
       popup.on("open", async () => {
         try {
           const details = await getStationPublicById(station.id);
-          popup.setHTML(buildPopupHtml(details));
+          const stationIndex = stations.findIndex((item) => item.id === station.id);
+          popup.setHTML(buildPopupHtml(details, stationIndex >= 0 ? stationIndex : 0, stations));
           
         } catch {
           popup.setHTML(`
@@ -804,7 +814,7 @@ export default function MapContainer() {
     }
 
     scheduleStationLabelUpdate();
-  }, [filteredStations, userLocation, scheduleStationLabelUpdate]);
+  }, [filteredStations, stations, userLocation, scheduleStationLabelUpdate]);
 
   const clearRoute = () => {
     const map = mapRef.current;
@@ -981,6 +991,13 @@ export default function MapContainer() {
     setFuelPriceRange({});
     setRadiusKm(5);
   };
+
+  const selectedStationIndex = selectedStation
+    ? stations.findIndex((station) => station.id === selectedStation.station.id)
+    : -1;
+  const selectedVisitRecommendation = selectedStation
+    ? getStationVisitRecommendation(selectedStation, selectedStationIndex >= 0 ? selectedStationIndex : 0, stations)
+    : null;
 
   return (
     <div
@@ -1251,13 +1268,28 @@ export default function MapContainer() {
             )}
           </div>
 
-          <div className="mt-3 border rounded-4 p-3" style={{ background: "#f8fbff", borderColor: "#dbeafe" }}>
-            <div className="fw-bold mb-2">Когда лучше посетить АЗС</div>
-            <div className="text-muted small">
-              Заглушка для будущего ML-модуля. Здесь позже будет показано оптимальное время визита
-              на основе прогнозной загруженности, очередей и доступности топлива.
+          {selectedVisitRecommendation && (
+            <div className="mt-3 border rounded-4 p-3" style={{ background: "#f8fbff", borderColor: "#dbeafe" }}>
+              <div className="fw-bold mb-2">Когда лучше посетить АЗС</div>
+              <div className="d-flex justify-content-between align-items-center mb-2">
+                <span className="badge text-bg-primary">ML-прогноз</span>
+                <strong>{selectedVisitRecommendation.loadScore}% загрузка</strong>
+              </div>
+              <div className="mb-2">
+                <strong>Лучшее время:</strong> {selectedVisitRecommendation.bestTime}
+              </div>
+              <div className="mb-2 text-muted small">
+                <strong>Лучше избегать:</strong> {selectedVisitRecommendation.avoidTime}
+              </div>
+              <div className="text-muted small mb-2">{selectedVisitRecommendation.reason}</div>
+              <div className="small">
+                <strong>Прогноз расхода 24ч:</strong> {formatLiters(selectedVisitRecommendation.forecast24hLiters)}
+              </div>
+              <div className="text-muted small mt-1">
+                Качество модели: R² {ML_MODEL_METRICS.R2}, MAPE {ML_MODEL_METRICS.MAPE_percent}%
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

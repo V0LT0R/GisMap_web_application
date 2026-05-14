@@ -1,0 +1,31 @@
+{
+  "model": "random_forest",
+  "train_rows": 633,
+  "test_rows": 159,
+  "features": [
+    "hour",
+    "weekday",
+    "month",
+    "is_holiday",
+    "event",
+    "day",
+    "is_weekend",
+    "hour_sin",
+    "hour_cos",
+    "month_sin",
+    "month_cos",
+    "prev_hour_sales",
+    "prev_2_hour_sales",
+    "prev_24_hour_sales",
+    "rolling_3h_mean",
+    "rolling_6h_mean",
+    "rolling_24h_mean",
+    "vehicle_count",
+    "real_brent_price",
+    "weekly_supply"
+  ],
+  "MAE_liters": 38.8167,
+  "RMSE_liters": 56.9654,
+  "R2": 0.8369,
+  "MAPE_percent": 17.4014
+}
