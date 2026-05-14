@@ -16,7 +16,7 @@ const links: Array<{ href: string; label: string; roles?: UserMe["role"][] }> = 
   { href: "/admin/audit", label: "Аудит", roles: ["super_admin"] },
 ];
 
-export default function AdminSidebar() {
+export default function AdminSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<UserMe | null>(null);
@@ -49,6 +49,7 @@ export default function AdminSidebar() {
               key={link.href}
               href={link.href}
               className={`admin-nav-link ${active ? "active" : ""}`}
+              onClick={onNavigate}
             >
               {link.label}
             </Link>

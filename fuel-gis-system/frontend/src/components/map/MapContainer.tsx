@@ -310,6 +310,7 @@ export default function MapContainer() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState("");
   const [routeInfo, setRouteInfo] = useState<{ distance?: string; duration?: string } | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const updateStationLabels = useCallback(() => {
     const map = mapRef.current;
@@ -1006,17 +1007,38 @@ export default function MapContainer() {
     >
       <Link
         href="/admin/login"
-        className="btn btn-primary position-absolute top-0 end-0 m-3 z-3"
+        className="map-login-btn btn btn-primary position-absolute top-0 end-0 m-3 z-3"
         style={{ borderRadius: 999, boxShadow: "0 6px 18px rgba(37,99,235,0.25)" }}
       >
         Войти
       </Link>
 
-      <div
-        className="position-absolute top-0 start-0 m-3 p-3 bg-white rounded shadow z-3"
-        style={{ width: 340, maxHeight: "85vh", overflowY: "auto" }}
+      <button
+        type="button"
+        className="map-filter-toggle btn btn-primary"
+        onClick={() => setFiltersOpen(true)}
       >
-        <h5 className="mb-3">Поиск АЗС рядом</h5>
+        Фильтры
+      </button>
+
+      <button
+        type="button"
+        aria-label="Закрыть фильтры"
+        className={`map-filter-backdrop ${filtersOpen ? "open" : ""}`}
+        onClick={() => setFiltersOpen(false)}
+      />
+
+      <div className={`map-filter-panel ${filtersOpen ? "open" : ""}`}>
+        <div className="map-filter-header">
+          <h5 className="mb-0">Поиск АЗС рядом</h5>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary map-filter-close"
+            onClick={() => setFiltersOpen(false)}
+          >
+            ✕
+          </button>
+        </div>
 
         <button className="btn btn-primary w-100 mb-3" onClick={requestUserLocation}>
           Определить мою геолокацию
@@ -1143,6 +1165,10 @@ export default function MapContainer() {
           Сбросить фильтры
         </button>
 
+        <button className="btn btn-primary w-100 mb-3 map-filter-apply" onClick={() => setFiltersOpen(false)}>
+          Показать на карте
+        </button>
+
         <div className="text-muted small">
           Найдено станций: {filteredStations.length}
         </div>
@@ -1155,15 +1181,7 @@ export default function MapContainer() {
       </div>
 
       {selectedStation && (
-        <div
-          className="position-absolute top-0 end-0 m-3 bg-white rounded shadow z-3"
-          style={{
-            width: 380,
-            maxHeight: "88vh",
-            overflowY: "auto",
-            padding: 20,
-          }}
-        >
+        <div className="map-station-details">
           <div className="d-flex justify-content-between align-items-start mb-3">
             <h5 className="mb-0">{selectedStation.station.name || "АЗС"}</h5>
             <button

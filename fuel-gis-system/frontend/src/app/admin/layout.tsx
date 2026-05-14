@@ -27,11 +27,16 @@ export default function AdminLayout({
   const router = useRouter();
   const title = getPageTitle(pathname);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const isAuthPage =
     pathname === "/admin/login" ||
     pathname === "/admin/register" ||
     pathname === "/admin/verify";
+
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (isAuthPage) {
@@ -94,12 +99,30 @@ export default function AdminLayout({
   }
 
   return (
-    <div className="admin-shell">
-      <AdminSidebar />
+    <div className={`admin-shell ${sidebarOpen ? "sidebar-open" : ""}`}>
+      <button
+        type="button"
+        className="admin-mobile-backdrop"
+        aria-label="Закрыть меню"
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      <AdminSidebar onNavigate={() => setSidebarOpen(false)} />
 
       <div className="admin-main">
         <header className="admin-topbar">
-          <div>
+          <button
+            type="button"
+            className="admin-menu-toggle"
+            onClick={() => setSidebarOpen((value) => !value)}
+            aria-label="Открыть меню"
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+
+          <div className="admin-topbar-text">
             <h1 className="admin-topbar-title">{title}</h1>
             <div className="admin-topbar-subtitle">
               Система управления топливными станциями
