@@ -7,8 +7,8 @@ import { saveToken } from "@/lib/auth/token";
 
 export default function LoginForm() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@gmail.com");
-  const [password, setPassword] = useState("Admin123456");
+  const [email, setEmail] = useState("example@gmail.com");
+  const [password, setPassword] = useState(" ");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
