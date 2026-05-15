@@ -15,6 +15,7 @@ from app.models.fuel_type import FuelType
 from app.models.station_fuel import StationFuel
 from app.models.audit_log import AuditLog
 
+
 app = FastAPI(title="Fuel GIS Backend")
 
 
@@ -31,6 +32,7 @@ def root():
 allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://gis-map-web-application-zn7a.vercel.app",
     settings.FRONTEND_URL.rstrip("/"),
 ]
 
