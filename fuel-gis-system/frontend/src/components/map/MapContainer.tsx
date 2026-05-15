@@ -233,9 +233,7 @@ function buildVisitForecastHtml(data: StationFull, stationIndex: number, allStat
       <div style="color:#111827;line-height:1.45;margin-bottom:6px;"><b>Лучшее время:</b> ${recommendation.bestTime}</div>
       <div style="color:#475569;line-height:1.45;margin-bottom:6px;"><b>Лучше избегать:</b> ${recommendation.avoidTime}</div>
       <div style="color:#475569;line-height:1.45;margin-bottom:6px;">${recommendation.reason}</div>
-      <div style="color:#64748b;font-size:12px;line-height:1.45;">
-        ML-прогноз 24ч: ${formatLiters(recommendation.forecast24hLiters)} · R² ${ML_MODEL_METRICS.R2}
-      </div>
+      
     </div>
   `;
 }
@@ -1317,12 +1315,7 @@ export default function MapContainer() {
                 <strong>Лучше избегать:</strong> {selectedVisitRecommendation.avoidTime}
               </div>
               <div className="text-muted small mb-2">{selectedVisitRecommendation.reason}</div>
-              <div className="small">
-                <strong>Прогноз расхода 24ч:</strong> {formatLiters(selectedVisitRecommendation.forecast24hLiters)}
-              </div>
-              <div className="text-muted small mt-1">
-                Качество модели: R² {ML_MODEL_METRICS.R2}, MAPE {ML_MODEL_METRICS.MAPE_percent}%
-              </div>
+            
             </div>
           )}
         </div>
