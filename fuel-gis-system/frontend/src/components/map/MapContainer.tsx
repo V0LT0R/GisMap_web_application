@@ -310,6 +310,7 @@ export default function MapContainer() {
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState("");
   const [routeInfo, setRouteInfo] = useState<{ distance?: string; duration?: string } | null>(null);
+  const [routeStationName, setRouteStationName] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const updateStationLabels = useCallback(() => {
@@ -774,8 +775,22 @@ export default function MapContainer() {
       el.addEventListener("click", async () => {
         try {
           setSelectedStationLoading(true);
-          setRouteInfo(null);
           setRouteError("");
+
+          const lng = Number(station.longitude);
+          const lat = Number(station.latitude);
+
+          if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+            return;
+          }
+
+          map.flyTo({
+            center: [lng, lat],
+            zoom: Math.max(map.getZoom(), 15),
+            duration: 700,
+            essential: true,
+          });
+
           const details = await getStationPublicById(station.id);
           setSelectedStation(details);
         } catch {
@@ -831,6 +846,7 @@ export default function MapContainer() {
     routePopupRef.current?.remove();
     routePopupRef.current = null;
     setRouteInfo(null);
+    setRouteStationName("");
     setRouteError("");
   };
 
@@ -882,7 +898,7 @@ export default function MapContainer() {
 
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds, {
-          padding: { top: 100, right: 430, bottom: 100, left: 380 },
+          padding: { top: 90, right: 80, bottom: 170, left: 80 },
           maxZoom: 15,
           duration: 700,
         });
@@ -901,18 +917,10 @@ export default function MapContainer() {
           : undefined;
 
       setRouteInfo({ distance, duration });
+      setRouteStationName(selectedStation.station.name || "Выбранная АЗС");
 
       routePopupRef.current?.remove();
-      routePopupRef.current = new maplibregl.Popup({ offset: 18 })
-        .setLngLat([stationLon, stationLat])
-        .setHTML(`
-          <div style="font-family:Arial,sans-serif;font-size:14px;min-width:190px;">
-            <div style="font-weight:700;margin-bottom:6px;">Маршрут до АЗС</div>
-            <div>Расстояние: ${distance || "-"}</div>
-            <div>Время: ${duration || "-"}</div>
-          </div>
-        `)
-        .addTo(map);
+      routePopupRef.current = null;
     } catch (err) {
       setRouteError(err instanceof Error ? err.message : "Не удалось построить маршрут");
     } finally {
@@ -1180,16 +1188,30 @@ export default function MapContainer() {
         )}
       </div>
 
+      {routeInfo && (
+        <div className="map-route-panel">
+          <div className="map-route-panel__icon">↗</div>
+          <div className="map-route-panel__body">
+            <div className="map-route-panel__title">Маршрут построен</div>
+            <div className="map-route-panel__station">{routeStationName || "Выбранная АЗС"}</div>
+            <div className="map-route-panel__meta">
+              {routeInfo.distance && <span>Расстояние: {routeInfo.distance}</span>}
+              {routeInfo.duration && <span>Время: {routeInfo.duration}</span>}
+            </div>
+          </div>
+          <button className="map-route-panel__clear" type="button" onClick={clearRoute}>
+            Очистить
+          </button>
+        </div>
+      )}
+
       {selectedStation && (
         <div className="map-station-details">
           <div className="d-flex justify-content-between align-items-start mb-3">
             <h5 className="mb-0">{selectedStation.station.name || "АЗС"}</h5>
             <button
               className="btn btn-sm btn-outline-secondary"
-              onClick={() => {
-                setSelectedStation(null);
-                clearRoute();
-              }}
+              onClick={() => setSelectedStation(null)}
             >
               ✕
             </button>
@@ -1234,16 +1256,11 @@ export default function MapContainer() {
 
             {routeInfo && (
               <div className="small text-muted">
-                {routeInfo.distance && <div>Расстояние: {routeInfo.distance}</div>}
-                {routeInfo.duration && <div>Время в пути: {routeInfo.duration}</div>}
+                Маршрут построен. Детали показаны в нижней панели карты.
               </div>
             )}
 
             {routeError && <div className="text-danger small">{routeError}</div>}
-
-            <button className="btn btn-sm btn-link p-0 mt-2" onClick={clearRoute}>
-              Очистить маршрут
-            </button>
           </div>
 
           {selectedStation.details.main_photo_url && (
