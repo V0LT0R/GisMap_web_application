@@ -17,7 +17,7 @@ export type VisitRecommendation = {
 };
 
 export const ML_MODEL_METRICS = {
-  "model": "random_forest",
+  "model": "xgboost",
   "train_rows": 633,
   "test_rows": 159,
   "features": [
@@ -42,10 +42,10 @@ export const ML_MODEL_METRICS = {
     "real_brent_price",
     "weekly_supply"
   ],
-  "MAE_liters": 38.8167,
-  "RMSE_liters": 56.9654,
-  "R2": 0.8369,
-  "MAPE_percent": 17.4014
+  "MAE_liters": 36.0553,
+  "RMSE_liters": 49.8137,
+  "R2": 0.8753,
+  "MAPE_percent": 16.7921
 } as const;
 
 export const ML_NEXT_24H_FORECAST: MlForecastPoint[] = [

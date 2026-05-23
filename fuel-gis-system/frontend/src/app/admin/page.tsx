@@ -9,7 +9,8 @@ import { getCurrentSessionUser } from "@/lib/auth/session";
 import { getToken } from "@/lib/auth/token";
 import type { StationListItem } from "@/types/station";
 import type { UserMe } from "@/types/auth";
-import { ML_MODEL_METRICS, ML_NEXT_24H_FORECAST, getStationVisitRecommendation, stationMlForecast24h } from "@/lib/analytics/mlFuelForecast";
+import { ML_MODEL_METRICS, ML_NEXT_24H_FORECAST, estimateStationLoadScore, getStationVisitRecommendation, stationMlForecast24h } from "@/lib/analytics/mlFuelForecast";
+import { getFuelDemandMlArtifacts, type MlFuelDemandArtifacts } from "@/lib/api/ml";
 
 const DEMAND_ZONES = [
   { name: "EXPO / Туран", type: "Зона роста", lat: 51.0909, lon: 71.4182, demand: 94, radiusKm: 1.7, roadFactor: 0.86 },
@@ -52,32 +53,23 @@ function nearestDemandZone(station: StationListItem) {
   return { ...best, distanceKm: bestDistance };
 }
 
-function stationCongestion(station: StationListItem, index: number) {
-  const columns = Math.max(Number(station.columns_count || 4), 1);
-  const zone = nearestDemandZone(station);
-  const zoneDemand = zone ? zone.demand / 100 : 0.45;
-  const roadBonus = zone && zone.distanceKm <= zone.radiusKm ? zone.roadFactor : 0.35;
-  const residentialBonus = zone?.type === "ЖК" || zone?.type === "Зона роста" ? 0.18 : 0.08;
-  const centerFactor = station.latitude && station.longitude
-    ? Math.max(0, 1 - distanceKm(Number(station.latitude), Number(station.longitude), ASTANA_CENTER.lat, ASTANA_CENTER.lon) / 18)
-    : 0.35;
-  const fuelFactor = station.fuel_codes?.length ? Math.min(station.fuel_codes.length / 5, 1) : 0.35;
-  const capacityPenalty = Math.max(0, 1 - columns / 12);
-  const deterministicNoise = ((station.id * 41 + index * 19) % 17) / 100;
-
-  return Math.round(
-    Math.min(
-      98,
-      Math.max(
-        10,
-        (0.16 + zoneDemand * 0.32 + roadBonus * 0.2 + residentialBonus + centerFactor * 0.1 + fuelFactor * 0.08 + capacityPenalty * 0.16 + deterministicNoise) * 100
-      )
-    )
-  );
+function stationCongestion(station: StationListItem, index: number, allStations: StationListItem[]) {
+  // The dashboard uses the same load estimation logic as the public map.
+  // Therefore, the list of the most loaded stations matches the station cards on the map.
+  return estimateStationLoadScore(station, index, allStations);
 }
 
-function forecastStationLiters(station: StationListItem, index: number) {
-  return stationMlForecast24h(station, index);
+function forecastStationLiters(
+  station: StationListItem,
+  index: number,
+  allStations: StationListItem[],
+  forecastProfile: { predictedLiters: number }[]
+) {
+  const staticBaseSum = ML_NEXT_24H_FORECAST.reduce((sum, item) => sum + item.predictedLiters, 0) || 1;
+  const dynamicBaseSum = forecastProfile.reduce((sum, item) => sum + item.predictedLiters, 0) || staticBaseSum;
+  const staticStationForecast = stationMlForecast24h(station, index, allStations);
+
+  return Math.round(staticStationForecast * (dynamicBaseSum / staticBaseSum));
 }
 
 function fuelDeficitCount(stations: StationListItem[]) {
@@ -99,6 +91,7 @@ export default function AdminDashboardPage() {
   const [stations, setStations] = useState<StationListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [mlArtifacts, setMlArtifacts] = useState<MlFuelDemandArtifacts | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -120,6 +113,13 @@ export default function AdminDashboardPage() {
           : await getMyStations(token);
 
         setStations(data);
+
+        try {
+          const artifacts = await getFuelDemandMlArtifacts();
+          setMlArtifacts(artifacts);
+        } catch (mlError) {
+          console.warn("ML artifacts were not loaded, static fallback will be used", mlError);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Не удалось загрузить данные dashboard");
       } finally {
@@ -131,11 +131,13 @@ export default function AdminDashboardPage() {
   }, []);
 
   const analytics = useMemo(() => {
+    const forecastProfile = mlArtifacts?.forecast?.length ? mlArtifacts.forecast : ML_NEXT_24H_FORECAST;
+
     const stationRows = stations.map((station, index) => {
       const zone = nearestDemandZone(station);
-      const congestion = stationCongestion(station, index);
-      const forecast = forecastStationLiters(station, index);
-      const visit = getStationVisitRecommendation(station, index);
+      const congestion = stationCongestion(station, index, stations);
+      const forecast = forecastStationLiters(station, index, stations, forecastProfile);
+      const visit = getStationVisitRecommendation(station, index, stations);
       return { station, zone, congestion, forecast, visit };
     });
 
@@ -177,8 +179,8 @@ export default function AdminDashboardPage() {
       .slice(0, 6);
 
     const forecast = stationRows.reduce((sum, row) => sum + row.forecast, 0);
-    const baseMlSum = ML_NEXT_24H_FORECAST.reduce((sum, item) => sum + item.predictedLiters, 0) || 1;
-    const mlHourlyForecast = ML_NEXT_24H_FORECAST.map((item) => ({
+    const baseMlSum = forecastProfile.reduce((sum, item) => sum + item.predictedLiters, 0) || 1;
+    const mlHourlyForecast = forecastProfile.map((item) => ({
       hour: `${String(item.hour).padStart(2, "0")}:00`,
       liters: Math.round((item.predictedLiters / baseMlSum) * forecast),
       vehicleCount: item.vehicleCount,
@@ -199,7 +201,7 @@ export default function AdminDashboardPage() {
       topLoaded: stationRows.sort((a, b) => b.congestion - a.congestion).slice(0, 5),
       mlHourlyForecast,
     };
-  }, [stations]);
+  }, [stations, mlArtifacts]);
 
   const congestionOption = {
     tooltip: { trigger: "item" },
@@ -278,6 +280,8 @@ export default function AdminDashboardPage() {
   };
 
   const isSuperAdmin = user?.role === "super_admin";
+  const mlMetrics = mlArtifacts?.metrics || ML_MODEL_METRICS;
+  const mlModelName = (mlMetrics.model || mlMetrics.model_class || "ML").toString().toUpperCase();
 
   return (
     <div className="dashboard-page">
@@ -327,8 +331,8 @@ export default function AdminDashboardPage() {
         </div>
         <div className="dashboard-kpi-card blue">
           <span>Качество ML-модели</span>
-          <strong>R² {ML_MODEL_METRICS.R2}</strong>
-          <small>MAPE {ML_MODEL_METRICS.MAPE_percent}%</small>
+          <strong>R² {Number(mlMetrics.R2 ?? 0).toFixed(4)}</strong>
+          <small>{mlModelName} · MAPE {Number(mlMetrics.MAPE_percent ?? 0).toFixed(2)}%</small>
         </div>
       </div>
 
@@ -370,15 +374,6 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      <div className="admin-card dashboard-note">
-        <h2 className="admin-card-title">Как считается аналитика</h2>
-        <p>
-          Dashboard использует обученный ML-прогноз расхода топлива как базовый временной профиль на 24 часа,
-          а затем масштабирует его под каждую АЗС с учетом количества колонок, доступности топлива, близости к
-          основным дорогам, ЖК/зонам роста и плотности покрытия в районах Астаны. Поэтому у разных администраторов
-          графики, KPI и рекомендуемое время посещения будут отличаться.
-        </p>
-      </div>
     </div>
   );
 }
