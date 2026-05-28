@@ -72,6 +72,142 @@ const ASTANA_BBOX = {
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
+
+const ASTANA_MAJOR_ROADS_FALLBACK = {
+  type: "FeatureCollection" as const,
+  features: [
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.3406, 51.1661],
+          [71.3578, 51.1565],
+          [71.3777, 51.1452],
+          [71.3994, 51.1332],
+          [71.4214, 51.1211],
+          [71.4426, 51.1090],
+          [71.4635, 51.0966],
+          [71.4854, 51.0839],
+          [71.5062, 51.0713],
+          [71.5255, 51.0592],
+        ],
+      },
+      properties: { name: "проспект Кабанбай Батыра", highway: "primary" },
+    },
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.3423, 51.1512],
+          [71.3652, 51.1466],
+          [71.3898, 51.1412],
+          [71.4147, 51.1360],
+          [71.4395, 51.1305],
+          [71.4640, 51.1249],
+          [71.4889, 51.1193],
+          [71.5136, 51.1133],
+        ],
+      },
+      properties: { name: "проспект Туран", highway: "primary" },
+    },
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.3694, 51.1050],
+          [71.3924, 51.1115],
+          [71.4155, 51.1187],
+          [71.4396, 51.1268],
+          [71.4633, 51.1370],
+          [71.4887, 51.1508],
+          [71.5130, 51.1654],
+        ],
+      },
+      properties: { name: "проспект Мәңгілік Ел", highway: "trunk" },
+    },
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.3717, 51.2032],
+          [71.3864, 51.1858],
+          [71.4023, 51.1673],
+          [71.4178, 51.1489],
+          [71.4317, 51.1307],
+          [71.4445, 51.1126],
+          [71.4568, 51.0942],
+        ],
+      },
+      properties: { name: "проспект Сарыарка", highway: "primary" },
+    },
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.4571, 51.0602],
+          [71.4570, 51.0792],
+          [71.4562, 51.0987],
+          [71.4535, 51.1176],
+          [71.4494, 51.1363],
+          [71.4440, 51.1535],
+        ],
+      },
+      properties: { name: "проспект Улы Дала", highway: "primary" },
+    },
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.3920, 51.0947],
+          [71.4086, 51.1041],
+          [71.4258, 51.1131],
+          [71.4439, 51.1211],
+          [71.4638, 51.1287],
+          [71.4863, 51.1351],
+          [71.5082, 51.1420],
+        ],
+      },
+      properties: { name: "улица Сауран", highway: "secondary" },
+    },
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.3846, 51.0724],
+          [71.4038, 51.0801],
+          [71.4231, 51.0876],
+          [71.4434, 51.0955],
+          [71.4656, 51.1049],
+          [71.4894, 51.1138],
+        ],
+      },
+      properties: { name: "проспект Рыскулбекова / южный коридор", highway: "secondary" },
+    },
+    {
+      type: "Feature" as const,
+      geometry: {
+        type: "LineString" as const,
+        coordinates: [
+          [71.4309, 51.0446],
+          [71.4368, 51.0574],
+          [71.4437, 51.0714],
+          [71.4519, 51.0859],
+          [71.4628, 51.0980],
+          [71.4756, 51.1089],
+        ],
+      },
+      properties: { name: "дорога к аэропорту", highway: "trunk" },
+    },
+  ],
+};
+
 const DEMAND_ZONES: DemandZone[] = [
   {
     id: "expo-turan-east",
@@ -290,6 +426,10 @@ async function loadAstanaMajorRoads() {
       };
     })
     .filter(Boolean);
+
+  if (features.length === 0) {
+    return ASTANA_MAJOR_ROADS_FALLBACK;
+  }
 
   return {
     type: "FeatureCollection" as const,
@@ -601,10 +741,7 @@ export default function ExpansionMap() {
     map.on("load", () => {
       map.addSource("major-roads", {
         type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: [],
-        },
+        data: ASTANA_MAJOR_ROADS_FALLBACK as never,
       });
 
       map.addLayer({
@@ -641,16 +778,8 @@ export default function ExpansionMap() {
         })
         .catch((err) => {
           console.warn("Major roads loading error, fallback roads used:", err);
-          const fallbackRoads = {
-            type: "FeatureCollection",
-            features: [
-              { type: "Feature", geometry: { type: "LineString", coordinates: [[71.344, 51.158], [71.39, 51.135], [71.431, 51.115], [71.474, 51.093], [71.52, 51.07]] }, properties: { name: "проспект Кабанбай Батыра", highway: "primary" } },
-              { type: "Feature", geometry: { type: "LineString", coordinates: [[71.371, 51.202], [71.404, 51.177], [71.431, 51.151], [71.452, 51.126], [71.472, 51.097]] }, properties: { name: "проспект Сарыарка", highway: "primary" } },
-              { type: "Feature", geometry: { type: "LineString", coordinates: [[71.395, 51.106], [71.425, 51.121], [71.462, 51.14], [71.507, 51.164]] }, properties: { name: "проспект Мәңгілік Ел", highway: "trunk" } },
-            ],
-          };
           const source = map.getSource("major-roads") as GeoJSONSource | undefined;
-          source?.setData(fallbackRoads as never);
+          source?.setData(ASTANA_MAJOR_ROADS_FALLBACK as never);
         });
 
       map.addSource("recommendation-zones", {
