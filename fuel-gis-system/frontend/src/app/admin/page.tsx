@@ -281,7 +281,7 @@ export default function AdminDashboardPage() {
 
   const isSuperAdmin = user?.role === "super_admin";
   const mlMetrics = mlArtifacts?.metrics || ML_MODEL_METRICS;
-  const mlModelName = (mlMetrics.model || mlMetrics.model_class || "ML").toString().toUpperCase();
+  const mlModelName = (mlMetrics.model || "ML").toString().toUpperCase();
 
   return (
     <div className="dashboard-page">
