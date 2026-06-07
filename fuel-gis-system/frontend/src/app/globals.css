@@ -545,13 +545,6 @@ a {
 .legend-dot.high { background: #16a34a; }
 .legend-dot.medium { background: #f59e0b; }
 .legend-dot.planned { background: #7c3aed; }
-.legend-line {
-  width: 22px;
-  height: 4px;
-  border-radius: 999px;
-  background: #2563eb;
-  display: inline-block;
-}
 
 .expansion-map {
   width: 100%;

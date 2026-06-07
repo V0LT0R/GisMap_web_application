@@ -40,173 +40,10 @@ type PlannedStation = {
   ownerEmail?: string | null;
 };
 
-type OverpassNode = {
-  type: "node";
-  id: number;
-  lat: number;
-  lon: number;
-};
-
-type OverpassWay = {
-  type: "way";
-  id: number;
-  nodes: number[];
-  tags?: Record<string, string>;
-};
-
-type OverpassResponse = {
-  elements: Array<OverpassNode | OverpassWay>;
-};
-
 const PLANNED_STORAGE_KEY = "fuel-gis-planned-stations";
 const ASTANA_CENTER: [number, number] = [71.4491, 51.1694];
 const OSM_RASTER_MAX_ZOOM = 19;
 const MAP_MAX_ZOOM = 19;
-
-const ASTANA_BBOX = {
-  south: 50.98,
-  west: 71.25,
-  north: 51.28,
-  east: 71.65,
-};
-
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
-
-
-const ASTANA_MAJOR_ROADS_FALLBACK = {
-  type: "FeatureCollection" as const,
-  features: [
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.3406, 51.1661],
-          [71.3578, 51.1565],
-          [71.3777, 51.1452],
-          [71.3994, 51.1332],
-          [71.4214, 51.1211],
-          [71.4426, 51.1090],
-          [71.4635, 51.0966],
-          [71.4854, 51.0839],
-          [71.5062, 51.0713],
-          [71.5255, 51.0592],
-        ],
-      },
-      properties: { name: "проспект Кабанбай Батыра", highway: "primary" },
-    },
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.3423, 51.1512],
-          [71.3652, 51.1466],
-          [71.3898, 51.1412],
-          [71.4147, 51.1360],
-          [71.4395, 51.1305],
-          [71.4640, 51.1249],
-          [71.4889, 51.1193],
-          [71.5136, 51.1133],
-        ],
-      },
-      properties: { name: "проспект Туран", highway: "primary" },
-    },
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.3694, 51.1050],
-          [71.3924, 51.1115],
-          [71.4155, 51.1187],
-          [71.4396, 51.1268],
-          [71.4633, 51.1370],
-          [71.4887, 51.1508],
-          [71.5130, 51.1654],
-        ],
-      },
-      properties: { name: "проспект Мәңгілік Ел", highway: "trunk" },
-    },
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.3717, 51.2032],
-          [71.3864, 51.1858],
-          [71.4023, 51.1673],
-          [71.4178, 51.1489],
-          [71.4317, 51.1307],
-          [71.4445, 51.1126],
-          [71.4568, 51.0942],
-        ],
-      },
-      properties: { name: "проспект Сарыарка", highway: "primary" },
-    },
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.4571, 51.0602],
-          [71.4570, 51.0792],
-          [71.4562, 51.0987],
-          [71.4535, 51.1176],
-          [71.4494, 51.1363],
-          [71.4440, 51.1535],
-        ],
-      },
-      properties: { name: "проспект Улы Дала", highway: "primary" },
-    },
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.3920, 51.0947],
-          [71.4086, 51.1041],
-          [71.4258, 51.1131],
-          [71.4439, 51.1211],
-          [71.4638, 51.1287],
-          [71.4863, 51.1351],
-          [71.5082, 51.1420],
-        ],
-      },
-      properties: { name: "улица Сауран", highway: "secondary" },
-    },
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.3846, 51.0724],
-          [71.4038, 51.0801],
-          [71.4231, 51.0876],
-          [71.4434, 51.0955],
-          [71.4656, 51.1049],
-          [71.4894, 51.1138],
-        ],
-      },
-      properties: { name: "проспект Рыскулбекова / южный коридор", highway: "secondary" },
-    },
-    {
-      type: "Feature" as const,
-      geometry: {
-        type: "LineString" as const,
-        coordinates: [
-          [71.4309, 51.0446],
-          [71.4368, 51.0574],
-          [71.4437, 51.0714],
-          [71.4519, 51.0859],
-          [71.4628, 51.0980],
-          [71.4756, 51.1089],
-        ],
-      },
-      properties: { name: "дорога к аэропорту", highway: "trunk" },
-    },
-  ],
-};
 
 const DEMAND_ZONES: DemandZone[] = [
   {
@@ -243,8 +80,8 @@ const DEMAND_ZONES: DemandZone[] = [
     id: "uly-dala-south",
     name: "Улы Дала / южный коридор",
     type: "residential",
-    lat: 51.0752,
-    lon: 71.4564,
+    lat: 51.076914, 
+    lon: 71.436444,
     demand: 8,
     radiusKm: 0.85,
     reason: "растущие жилые кварталы и движение к аэропорту",
@@ -370,72 +207,6 @@ const DEMAND_ZONES: DemandZone[] = [
     reason: "деловая активность, учебные корпуса и высокий поток по магистрали",
   },
 ];
-
-async function loadAstanaMajorRoads() {
-  const query = `
-    [out:json][timeout:25];
-    (
-      way["highway"~"motorway|trunk|primary|secondary"]
-        (${ASTANA_BBOX.south},${ASTANA_BBOX.west},${ASTANA_BBOX.north},${ASTANA_BBOX.east});
-    );
-    (._;>;);
-    out body;
-  `;
-
-  const response = await fetch(OVERPASS_URL, {
-    method: "POST",
-    body: query,
-    headers: {
-      "Content-Type": "text/plain;charset=UTF-8",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Не удалось загрузить основные дороги");
-  }
-
-  const data = (await response.json()) as OverpassResponse;
-  const nodes = new Map<number, [number, number]>();
-
-  data.elements.forEach((element) => {
-    if (element.type === "node") {
-      nodes.set(element.id, [element.lon, element.lat]);
-    }
-  });
-
-  const features = data.elements
-    .filter((element): element is OverpassWay => element.type === "way")
-    .map((way) => {
-      const coordinates = way.nodes
-        .map((nodeId) => nodes.get(nodeId))
-        .filter(Boolean) as [number, number][];
-
-      if (coordinates.length < 2) return null;
-
-      return {
-        type: "Feature" as const,
-        geometry: {
-          type: "LineString" as const,
-          coordinates,
-        },
-        properties: {
-          id: way.id,
-          name: way.tags?.["name:ru"] || way.tags?.name || "Основная дорога",
-          highway: way.tags?.highway || "road",
-        },
-      };
-    })
-    .filter(Boolean);
-
-  if (features.length === 0) {
-    return ASTANA_MAJOR_ROADS_FALLBACK;
-  }
-
-  return {
-    type: "FeatureCollection" as const,
-    features,
-  };
-}
 
 function toRad(value: number) {
   return (value * Math.PI) / 180;
@@ -739,49 +510,6 @@ export default function ExpansionMap() {
     map.addControl(new maplibregl.NavigationControl(), "top-right");
 
     map.on("load", () => {
-      map.addSource("major-roads", {
-        type: "geojson",
-        data: ASTANA_MAJOR_ROADS_FALLBACK as never,
-      });
-
-      map.addLayer({
-        id: "major-roads-line",
-        type: "line",
-        source: "major-roads",
-        layout: {
-          "line-cap": "round",
-          "line-join": "round",
-        },
-        paint: {
-          "line-color": [
-            "match",
-            ["get", "highway"],
-            "motorway",
-            "#16a34a",
-            "trunk",
-            "#22c55e",
-            "primary",
-            "#2563eb",
-            "secondary",
-            "#f59e0b",
-            "#64748b",
-          ],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2, 12, 4, 14, 7],
-          "line-opacity": 0.75,
-        },
-      });
-
-      loadAstanaMajorRoads()
-        .then((roadGeoJson) => {
-          const source = map.getSource("major-roads") as GeoJSONSource | undefined;
-          source?.setData(roadGeoJson as never);
-        })
-        .catch((err) => {
-          console.warn("Major roads loading error, fallback roads used:", err);
-          const source = map.getSource("major-roads") as GeoJSONSource | undefined;
-          source?.setData(ASTANA_MAJOR_ROADS_FALLBACK as never);
-        });
-
       map.addSource("recommendation-zones", {
         type: "geojson",
         data: {
@@ -1154,9 +882,6 @@ export default function ExpansionMap() {
               </span>
               <span>
                 <i className="legend-dot medium" /> Средний приоритет
-              </span>
-              <span>
-                <i className="legend-line" /> Основные дороги
               </span>
               <span>
                 <i className="legend-dot planned" /> Скоро появится
